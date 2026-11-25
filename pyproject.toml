@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "switchboard"
+version = "0.1.0"
+description = "Failover LLM gateway: one model name, OpenAI + Anthropic APIs in, ordered provider blocks out"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Nick Leghorn" }]
+keywords = ["llm", "gateway", "proxy", "failover", "openai", "anthropic", "gemini", "ollama", "llama.cpp"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Framework :: AsyncIO",
+    "Topic :: Internet :: Proxy Servers",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "starlette>=0.40",
+    "uvicorn>=0.30",
+    "httpx>=0.27",
+    "pydantic>=2.6",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+smoke = ["openai>=1.0", "anthropic>=0.40"]
+
+[project.urls]
+Homepage = "https://github.com/foghorn/switchboard"
+Documentation = "https://github.com/foghorn/switchboard/tree/main/docs"
+Issues = "https://github.com/foghorn/switchboard/issues"
+
+[project.scripts]
+switchboard = "switchboard.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["switchboard*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

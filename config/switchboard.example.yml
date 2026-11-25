@@ -1,0 +1,95 @@
+# Switchboard example config.
+#
+#   cp config/switchboard.example.yml config/switchboard.yml   # gitignored
+#
+# A route is the single model name clients see. Its blocks are tried top to
+# bottom until one answers. Each block is complete on its own: provider, URL,
+# key, model, timeouts, cooldown, parameter tweaks and pricing. Repeat a key in
+# several blocks if they share it.
+#
+# Any string can reference an environment variable as ${NAME}; this example
+# keeps every secret in the environment so the file itself holds none. Literal
+# values work too (keep the file out of version control if you use them).
+#
+# Edits are applied live (file watch every 5 s, or SIGHUP). An invalid edit is
+# logged and the previous config stays in force.
+#
+# Full reference: docs/configuration.md
+
+server:
+  unknown_model: default        # a request naming an unknown model goes to the first route ("reject" = 404)
+  expose_block_header: false    # true = add "X-Switchboard-Block: <id>" to responses
+  probe_interval: 15            # seconds between health probes of cooling-down blocks
+  context_refresh: 600          # seconds between context-window re-detection
+  state_dir: /state             # spend.json and requests.jsonl
+
+clients:                        # gateway keys, sent as "Authorization: Bearer" or "x-api-key" (16+ chars)
+  - name: admin
+    key: ${SWITCHBOARD_ADMIN_KEY}
+    admin: true                 # may force a block (X-Switchboard-Force) and sees URLs in /status
+  - name: my-app
+    key: ${SWITCHBOARD_MY_APP_KEY}
+
+routes:
+  - name: default                   # the model name clients use
+    context_tokens: auto            # advertised window: auto/min = smallest in the chain, max, or a number
+    blocks:
+
+      # 1 ── a local GPU server (llama.cpp / vLLM / LM Studio, OpenAI-compatible) ──
+      - id: local-gpu
+        provider: openai                       # openai | anthropic | gemini
+        base_url: http://gpu-server.lan:8080/v1
+        api_key: ${LOCAL_GPU_API_KEY}          # omit or leave empty if the server needs none
+        model: my-local-model
+        max_context_tokens: auto               # ask the server; a number pins it; bigger prompts skip this block
+        timeouts:
+          connect: 3                           # TCP/TLS connect
+          first_token: 90                      # streaming: allow for a cold model load
+          idle: 120                            # streaming: longest silence once output started
+          total: 1800                          # whole request (the only deadline for non-streaming calls)
+        cooldown: {after_failures: 2, seconds: 30, probe: true}
+        failover_on_400: context               # context | always | never
+        # overrides: {chat_template_kwargs: {enable_thinking: false}}   # e.g. turn reasoning off
+
+      # 2 ── a slower local fallback: Ollama ──────────────────────────────────────
+      - id: ollama
+        provider: openai
+        base_url: http://ollama.lan:11434/v1
+        model: my-ollama-model:latest
+        max_context_tokens: auto               # read from Ollama /api/ps while the model is loaded
+        context_fallback: 131072               # used until the model has been seen loaded
+        timeouts: {connect: 3, first_token: 300, idle: 180, total: 3600}
+        cooldown: {after_failures: 2, seconds: 60, probe: true}
+
+      # 3 ── last resort: a paid cloud model, with a daily spend cap ─────────────
+      - id: claude-haiku
+        provider: anthropic
+        base_url: https://api.anthropic.com
+        api_key: ${ANTHROPIC_API_KEY}
+        model: claude-haiku-5-5
+        max_context_tokens: auto               # from the Anthropic models API
+        default_max_tokens: 16000              # Anthropic requires max_tokens; used when the client sends none
+        drop_params: [temperature, top_p, top_k]   # this model rejects non-default sampling values
+        timeouts: {connect: 5, first_token: 60, idle: 120, total: 900}
+        cooldown: {after_failures: 3, seconds: 30, probe: false}
+        pricing:                               # USD per million tokens; for the request log and the cap
+          input_per_mtok: 0.10
+          output_per_mtok: 0.50
+          long_context_threshold: 100000       # optional second rate card above this prompt size
+          long_input_per_mtok: 0.50
+          long_output_per_mtok: 2.50
+        spend_cap_usd_per_day: 5.00            # skipped for the rest of the day once reached
+
+      # ── other providers ──────────────────────────────────────────────────────
+      # - id: gemini-flash
+      #   provider: gemini
+      #   base_url: https://generativelanguage.googleapis.com
+      #   api_key: ${GEMINI_API_KEY}
+      #   model: gemini-model-name
+      #   default_max_tokens: 16000
+      #
+      # - id: openai
+      #   provider: openai
+      #   base_url: https://api.openai.com/v1
+      #   api_key: ${OPENAI_API_KEY}
+      #   model: openai-model-name

@@ -1,0 +1,16 @@
+# Keep secrets and local state out of the build context (and so out of any image).
+config/
+state/
+.env
+*.env
+.git/
+.github/
+docs/
+examples/
+tests/
+**/__pycache__/
+**/*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/

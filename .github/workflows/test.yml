@@ -1,0 +1,37 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -e '.[dev]'
+      - run: pytest -q
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t switchboard:ci .
+      - name: example config validates inside the image
+        run: |
+          docker run --rm -v "$PWD/config:/config:ro" \
+            -e SWITCHBOARD_CONFIG=/config/switchboard.example.yml \
+            -e SWITCHBOARD_ADMIN_KEY=ci-admin-key-0000000000 \
+            -e SWITCHBOARD_MY_APP_KEY=ci-app-key-00000000000 \
+            -e LOCAL_GPU_API_KEY=x -e ANTHROPIC_API_KEY=x \
+            switchboard:ci check || [ $? -eq 1 ]   # 1 = blocks unreachable (expected in CI); 2 = invalid config

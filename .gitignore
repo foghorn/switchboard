@@ -1,0 +1,19 @@
+# Real config: holds client keys and (possibly) upstream API keys. Never commit.
+config/switchboard.yml
+config/*.local.yml
+.env
+*.env
+
+# Runtime state (spend.json, requests.jsonl)
+state/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/

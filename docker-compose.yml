@@ -1,0 +1,35 @@
+# Minimal deployment.
+#
+#   cp config/switchboard.example.yml config/switchboard.yml   # then edit it
+#   cp .env.example .env                                       # if your config uses ${VARS}
+#   docker compose up -d --build
+#
+# Clients then use http://<host>:8000/v1 (OpenAI) or http://<host>:8000 (Anthropic).
+services:
+  switchboard:
+    build: .
+    image: switchboard:latest
+    container_name: switchboard
+    restart: unless-stopped
+    ports:
+      - "8000:8000"   # e.g. "10.0.0.5:8000:8000" to listen on one interface only
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      TZ: UTC          # daily spend caps reset at local midnight in this zone
+    volumes:
+      # The directory (not the file) is mounted so editors that replace the file
+      # still trigger the live reload. ",z" relabels for SELinux; harmless elsewhere.
+      - ./config:/config:ro,z
+      - switchboard_state:/state
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  switchboard_state:
