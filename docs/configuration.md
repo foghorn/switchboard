@@ -27,7 +27,9 @@ routes:  [...]   # required, at least one
 | `expose_block_header` | `false` | Adds `X-Switchboard-Block: <block id>` to responses. Off by default so the gateway stays transparent. |
 | `probe_interval` | `15` | Seconds between health probes of blocks that are cooling down. |
 | `context_refresh` | `600` | Seconds between context-window re-detections. |
-| `state_dir` | `/state` | Where `spend.json` and `requests.jsonl` are written. If it isn't writable, spend is kept in memory only and the request log goes to stdout only. |
+| `state_dir` | `/state` | Where `spend.json`, `requests.jsonl` and `captures/` are written. If it isn't writable, spend is kept in memory only, the request log goes to stdout only, and nothing is captured. |
+| `capture.retention_days` | `7` | [Captures](operations.md#capturing-prompts) older than this many days are deleted. |
+| `capture.max_mb` | `1024` | When captures take more than this, the oldest days are deleted. If today's captures alone are over it, capturing pauses until they aren't. |
 
 ## `clients`
 
@@ -37,7 +39,8 @@ Every request must carry one of these keys, as `Authorization: Bearer <key>` or 
 |---|---|---|
 | `name` | required | Label used in logs. Must be unique. |
 | `key` | required | At least 16 characters, unique. `openssl rand -base64 24` makes a good one. |
-| `admin` | `false` | May use `X-Switchboard-Force` and sees upstream URLs and models in `/status`. |
+| `admin` | `false` | May use `X-Switchboard-Force` and `X-Switchboard-Capture`, and sees upstream URLs and models in `/status`. |
+| `capture` | `false` | Save this client's full requests and responses to `state_dir/captures/`. See [capturing prompts](operations.md#capturing-prompts). |
 
 ## `routes`
 

@@ -734,3 +734,119 @@ def test_context_advertised_and_used_for_skipping(tmp_path):
                     json={"model": "gateway", "messages": [{"role": "user", "content": "x" * 2000}]})
         assert r.json()["choices"][0]["message"]["content"] == "backup"
         assert not fake.calls["gpu-box"]
+
+
+# ---------------------------------------------------------------------------
+# Prompt capture
+# ---------------------------------------------------------------------------
+
+from switchboard.capture import Reader, render  # noqa: E402
+
+
+def _cap_client(tmp_path, blocks, fake, capture=True):
+    cfg = make_cfg(tmp_path, blocks)
+    cfg.clients[0].capture = capture
+    eng = Engine(cfg, transport=httpx.MockTransport(fake))
+    return TestClient(create_app(eng)), eng
+
+
+def _log_lines(tmp_path):
+    return [json.loads(x) for x in (tmp_path / "state" / "requests.jsonl").read_text().splitlines()]
+
+
+def test_capture_off_by_default_and_admin_header(tmp_path):
+    fake = Fake()
+    fake.on("gpu-box", lambda req, body: httpx.Response(200, json=oa_resp()))
+    tc, eng = _cap_client(tmp_path, [oa_block("local", "gpu-box")], fake, capture=False)
+    with tc:
+        assert tc.post("/v1/chat/completions", json=CHAT, headers=H).status_code == 200
+        r = tc.post("/v1/chat/completions", json=CHAT, headers=H | {"x-switchboard-capture": "1"})
+        assert r.status_code == 403
+        r = tc.post("/v1/chat/completions", json=CHAT,
+                    headers={"authorization": f"Bearer {ADMIN}", "x-switchboard-capture": "1"})
+        assert r.status_code == 200
+        eng.captures.flush()
+    lines = _log_lines(tmp_path)
+    assert "capture" not in lines[0] and lines[-1]["capture"]
+    assert [s["client"] for s in Reader(tmp_path / "state" / "captures").summaries()] == ["admin"]
+
+
+def test_capture_failover_turns_are_deduplicated(tmp_path):
+    fake = Fake()
+    fake.on("gpu-box", lambda req, body: httpx.Response(503, text="down"))
+    fake.on("api.anthropic.com", lambda req, body: httpx.Response(200, json=an_resp()))
+    tc, eng = _cap_client(tmp_path, [oa_block("local", "gpu-box", cooldown={"after_failures": 99}), an_block()], fake)
+    system = "You are a careful assistant. " * 40  # big enough to be deduplicated
+    tools = [{"type": "function", "function": {"name": f"tool{i}", "description": "x" * 100,
+                                                "parameters": {"type": "object"}}} for i in range(5)]
+    msgs = [{"role": "system", "content": system}, {"role": "user", "content": "first question"}]
+    refs = []
+    with tc:
+        for turn in range(3):
+            sent = msgs
+            r = tc.post("/v1/chat/completions", json={"model": "gateway", "messages": sent, "tools": tools}, headers=H)
+            assert r.status_code == 200
+            msgs = msgs + [r.json()["choices"][0]["message"], {"role": "user", "content": f"follow-up {turn}"}]
+        eng.captures.flush()
+        refs = [x["capture"] for x in _log_lines(tmp_path)]
+    root = tmp_path / "state" / "captures"
+    reader = Reader(root)
+    raw3 = reader.load(refs[2])
+    # Turn 3 stores only its new messages and points at turn 2 for the rest and for the tools.
+    assert raw3["request"]["$base"]["ref"] == refs[1]
+    assert raw3["request"]["$base"]["messages"] == 4 and "tools" in raw3["request"]["$base"]["same"]
+    assert len(raw3["request"]["messages"]) == 2 and "tools" not in raw3["request"]
+    # ...and the full request comes back on read.
+    full = reader.resolve(refs[2].split("/")[1])
+    assert full["request"]["messages"] == sent
+    assert full["request"]["messages"][0]["content"] == system and full["request"]["tools"] == tools
+    # Both attempts carry what that block was actually sent, translated for Anthropic.
+    local, haiku = full["attempts"]
+    assert local["block"] == "local" and "503" in local["error"] and local["body"]["model"] == "local-model"
+    assert haiku["ok"] and haiku["body"]["system"] == system and haiku["body"]["model"] == "claude-haiku-5-5"
+    assert len(haiku["body"]["messages"]) == 5
+    assert haiku["response"]["content"][0]["text"] == "from haiku"  # raw upstream answer
+    assert full["response"]["choices"][0]["message"]["content"] == "from haiku"  # what the client got
+    text = render(full)
+    assert "=== tools (5) ===" in text and "follow-up 1" in text and "from haiku" in text
+    # Files are private to the service user.
+    f = next(root.glob("*/*.json.gz"))
+    assert oct(f.stat().st_mode & 0o777) == "0o600"
+
+
+def test_capture_stream_reassembled(tmp_path):
+    fake = Fake()
+    fake.on("gpu-box", lambda req, body: sse_stream(oa_sse(_chunks(["Hel", "lo"]))))
+    tc, eng = _cap_client(tmp_path, [oa_block("local", "gpu-box")], fake)
+    body = {"model": "gateway", "max_tokens": 50, "stream": True, "messages": [{"role": "user", "content": "x"}]}
+    with tc:
+        with tc.stream("POST", "/v1/messages", json=body, headers={"x-api-key": KEY}) as r:
+            list(r.iter_lines())
+        eng.captures.flush()
+    ref = _log_lines(tmp_path)[0]["capture"]
+    doc = Reader(tmp_path / "state" / "captures").resolve(ref)
+    assert doc["attempts"][0]["response"]["choices"][0]["message"]["content"] == "Hello"
+    assert doc["response"]["content"][0]["text"] == "Hello" and doc["response"]["model"] == "gateway"
+    assert doc["attempts"][0]["body"]["messages"] == [{"role": "user", "content": "x"}]
+
+
+def test_capture_prune_and_missing_base(tmp_path):
+    from switchboard.capture import CaptureStore
+
+    root = tmp_path / "caps"
+    for day in ("2000-01-01", "2999-01-01"):
+        (root / day).mkdir(parents=True)
+        (root / day / "a.json.gz").write_bytes(b"x" * 10)
+    store = CaptureStore(root, lambda: None)
+    store.prune(retention_days=7, max_mb=1)
+    assert not (root / "2000-01-01").exists() and (root / "2999-01-01").exists()
+    # A capture whose base was deleted still reads, with a marker for the missing part.
+    import gzip as _gz
+    doc = {"ref": "2999-01-01/b", "attempts": [], "request": {
+        "messages": [{"role": "user", "content": "new"}],
+        "$base": {"ref": "2000-01-01/a", "slot": "request", "key": "messages", "messages": 3, "same": []}}}
+    (root / "2999-01-01" / "b.json.gz").write_bytes(_gz.compress(json.dumps(doc).encode()))
+    full = Reader(root).resolve("b")
+    assert "3 earlier item(s)" in full["request"]["messages"][0]["content"]
+    assert full["request"]["messages"][1]["content"] == "new"
+    store.close()

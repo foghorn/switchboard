@@ -16,6 +16,7 @@ import httpx
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
 from . import translate as tr
+from .capture import Assembler, CaptureStore
 from .config import Block, Config, Route
 from .providers import PROVIDERS, Provider, UpstreamError, Usage, classify_http_error
 from .state import StateStore
@@ -152,10 +153,12 @@ class Engine:
         self.cfg = cfg
         self.config_path = config_path
         self.state = StateStore(Path(cfg.server.state_dir))
+        self.captures = CaptureStore(Path(cfg.server.state_dir) / "captures", lambda: self.cfg.server.capture)
         self.http = httpx.AsyncClient(transport=transport, limits=httpx.Limits(max_connections=200))
 
     async def close(self) -> None:
         await self.http.aclose()
+        self.captures.close()
 
     # -- block selection --------------------------------------------------
 
@@ -242,7 +245,7 @@ class Engine:
     # -- main entry -------------------------------------------------------
 
     async def handle(self, client_fmt: str, body: dict, client: str, force: str | None,
-                     inbound_headers: dict[str, str]) -> Response:
+                     inbound_headers: dict[str, str], capture: bool = False) -> Response:
         cfg = self.cfg
         route = cfg.route(body.get("model"))
         if route is None:
@@ -258,6 +261,8 @@ class Engine:
 
         entry: dict[str, Any] = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "id": rid, "client": client,
                                  "route": route.name, "api": client_fmt, "stream": stream}
+        if capture and self.state.writable:
+            entry["_cap"] = self.captures.start(rid, client, client_fmt, body)
 
         for block in blocks:
             a0 = time.monotonic()
@@ -292,6 +297,7 @@ class Engine:
              note: str | None = None) -> None:
         e = dict(entry, attempts=attempts, served_by=block.id if block else None, status=status,
                  ms=int((time.monotonic() - t0) * 1000))
+        cap = e.pop("_cap", None)
         if ttft_ms is not None:
             e["ttft_ms"] = ttft_ms
         if usage is not None:
@@ -302,6 +308,12 @@ class Engine:
                 self.state.add_spend(block, cost)
         if note:
             e["note"] = note
+        if cap is not None:
+            e["capture"] = cap.ref
+            try:
+                self.captures.finish(cap, e)
+            except Exception:  # noqa: BLE001 - capture must never fail a request
+                log.exception("capture: could not record %s", cap.ref)
         self.state.log_request(e)
 
     # -- non-streaming ----------------------------------------------------
@@ -310,6 +322,9 @@ class Engine:
                         inbound: dict[str, str], entry: dict, attempts: list, t0: float) -> Response:
         p = PROVIDERS[block.provider]
         nb = self.build_body(block, client_fmt, body, stream=False)
+        cap = entry.get("_cap")
+        if cap is not None:
+            cap.upstream(block.id, nb)
         to = block.timeouts
         timeout = httpx.Timeout(connect=to.connect, read=to.total, write=to.total, pool=to.connect)
         try:
@@ -326,6 +341,7 @@ class Engine:
             raise classify_http_error(block, r.status_code, r.text)
         try:
             data = r.json()
+            raw = copy.deepcopy(data) if cap is not None and p.fmt != client_fmt else None
         except ValueError as e:
             raise UpstreamError("response is not JSON") from e
         if err := p.response_error(data):
@@ -333,6 +349,8 @@ class Engine:
         usage = Usage(p.fmt)
         usage.observe_response(data)
         out = self.convert_response(p, client_fmt, data, alias)
+        if cap is not None:
+            cap.responded(block.id, raw, out, p.fmt == client_fmt)
         self.state.success(block)
         attempts.append({"block": block.id, "ok": True})
         self._log(entry, attempts, block, t0, usage=usage)
@@ -344,6 +362,11 @@ class Engine:
                           inbound: dict[str, str], entry: dict, attempts: list, t0: float) -> Response:
         p = PROVIDERS[block.provider]
         nb = self.build_body(block, client_fmt, body, stream=True)
+        cap = entry.get("_cap")
+        asm = None
+        if cap is not None:
+            cap.upstream(block.id, nb)
+            asm = Assembler(p.fmt)
         to = block.timeouts
         start = time.monotonic()
         first_deadline = start + to.first_token
@@ -380,6 +403,8 @@ class Engine:
                 if err := p.item_error(item):
                     raise UpstreamError(f"stream error: {err}")
                 usage.observe_item(item)
+                if asm is not None:
+                    asm.feed(item)
                 buffered += pipe.feed(item)
                 if p.is_progress(item):
                     break
@@ -421,6 +446,8 @@ class Engine:
                         status = 502
                         return
                     usage.observe_item(item)
+                    if asm is not None:
+                        asm.feed(item)
                     for b in pipe.feed(item):
                         yield b
                 for b in pipe.finish():
@@ -442,10 +469,22 @@ class Engine:
                 await resp.aclose()
                 if status != 200:
                     log.warning("[%s] %s: %s", entry["id"], block.id, note)
+                if cap is not None and asm is not None:
+                    self._capture_stream(cap, asm, p, client_fmt, block, alias)
                 self._log(entry, attempts, block, t0, status=status, usage=usage, ttft_ms=ttft_ms, note=note)
 
         return StreamingResponse(gen(), media_type="text/event-stream",
                                  headers={"cache-control": "no-cache", "x-accel-buffering": "no"})
+
+    def _capture_stream(self, cap: Any, asm: Assembler, p: Provider, client_fmt: str, block: Block,
+                        alias: str) -> None:
+        """Rebuild the streamed answer as one whole response, in both formats."""
+        raw = asm.result()
+        try:
+            view = self.convert_response(p, client_fmt, copy.deepcopy(raw), alias)
+        except Exception:  # noqa: BLE001 - a partial stream may not translate
+            view = raw
+        cap.responded(block.id, raw, view, p.fmt == client_fmt)
 
     # -- probes -----------------------------------------------------------
 

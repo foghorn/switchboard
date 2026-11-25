@@ -22,6 +22,8 @@ CLI:
 ```
 switchboard serve [--config PATH] [--host 0.0.0.0] [--port 8000]
 switchboard check [--config PATH]
+switchboard captures [list [--client NAME] [--day YYYY-MM-DD] [-n 20]]
+switchboard captures show ID [--trim N] [--tools] [--json] [--upstream BLOCK]
 ```
 
 ## Pre-flight check
@@ -59,8 +61,48 @@ Every request writes one JSON line to stdout (`docker logs`) and to `state_dir/r
 | `ttft_ms` | Streaming only: time until the request committed to a block |
 | `cost_usd` | Only for blocks with `pricing` |
 | `note` | Mid-stream problems: stall, upstream error, client disconnect |
+| `capture` | Only when the request was [captured](#capturing-prompts): its capture id |
 
-Prompts and responses are never logged.
+The request log never contains prompts or responses. Those are only saved by capture, which is off unless you turn it on.
+
+## Capturing prompts
+
+Capture saves the exact messages that pass through the gateway, for debugging system prompts, tool definitions and agent loops. It is off by default. Turn it on for one client in the config (applied live, no restart):
+
+```yaml
+clients:
+  - name: my-agent
+    key: ${SWITCHBOARD_MY_AGENT_KEY}
+    capture: true
+```
+
+An admin key can also capture a single request with `X-Switchboard-Capture: 1`, or skip one with `0`.
+
+Each captured request is one file, `state_dir/captures/<day>/<id>.json.gz`, holding:
+
+| Part | What it is |
+|---|---|
+| `request` | The body exactly as the client sent it |
+| `attempts[].body` | What each tried block was actually sent: after translation, `defaults`, `overrides` and `drop_params`. Failed attempts are included, with their error. |
+| `attempts[].response` | The upstream's own answer, when its format differs from the client's |
+| `response` | What the client received. Streamed answers are put back together into one response; a stream cut off mid-way keeps what arrived. |
+| everything else | The same fields as the request log line |
+
+Read them with the CLI; inside Docker, run it with `docker exec`:
+
+```bash
+docker exec switchboard switchboard captures list --client my-agent
+docker exec switchboard switchboard captures show 53bb024bd378            # readable transcript
+docker exec switchboard switchboard captures show 53bb024bd378 --trim 500 # shorten long messages
+docker exec switchboard switchboard captures show 53bb024bd378 --upstream claude-haiku   # exact upstream body (JSON)
+docker exec switchboard switchboard captures show 53bb024bd378 --json | jq .request.system
+```
+
+The request log's `capture` field gives the id to look up.
+
+**Disk use.** Agent loops resend the whole conversation on every turn. A capture therefore stores only the messages that an earlier capture of the same client doesn't already have, plus a reference to that capture, and it also reuses identical large fields such as the system prompt and tool list. `show` puts the full request back together. Files are gzip-compressed. Old days are deleted after `server.capture.retention_days`, and the oldest go first when `server.capture.max_mb` is exceeded. If a capture refers to one that has been deleted, `show` marks the missing part.
+
+**Privacy.** Captures contain everything the client sent and received, which may include personal or confidential data. Files are readable only by the service user (mode 0600). Capture only the clients you are debugging, and turn it off afterwards. API keys and request headers are never captured.
 
 `requests.jsonl` isn't rotated by Switchboard. Rotate it externally if the volume matters to you; `docker logs` rotation is set by the Docker log driver.
 

@@ -87,8 +87,12 @@ def create_app(engine: Engine) -> Starlette:
         force = request.headers.get("x-switchboard-force") or None
         if force and not client.admin:
             return error_response(fmt, 403, "x-switchboard-force needs an admin key", "permission_error")
+        want = request.headers.get("x-switchboard-capture")
+        if want is not None and not client.admin:
+            return error_response(fmt, 403, "x-switchboard-capture needs an admin key", "permission_error")
+        capture = client.capture if want is None else want.strip().lower() in ("1", "true", "yes", "on")
         inbound = {k: v for k, v in request.headers.items() if k in ("anthropic-version", "anthropic-beta")}
-        return await engine.handle(fmt, body, client.name, force, inbound)
+        return await engine.handle(fmt, body, client.name, force, inbound, capture=capture)
 
     async def count_tokens(request: Request) -> Response:
         _, denied = await guard(request)

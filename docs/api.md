@@ -29,6 +29,7 @@ Both headers work on every endpoint, so OpenAI SDKs (which send Bearer) and Anth
 | Header | Effect |
 |---|---|
 | `X-Switchboard-Force: <block id>` | Admin keys only. Try exactly this block, ignoring cooldown, spend cap and size checks. |
+| `X-Switchboard-Capture: 1` or `0` | Admin keys only. Capture this request, or don't, whatever the client's `capture` setting. See [capturing prompts](operations.md#capturing-prompts). |
 
 ### Response headers
 

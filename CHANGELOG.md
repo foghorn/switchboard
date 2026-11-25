@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.0 (2026-11-25)
+
+- Opt-in prompt capture (`capture: true` per client, or the admin-only `X-Switchboard-Capture` header):
+  - saves the client request, the exact body each tried block was sent, the upstream answer and the client's response, with streams reassembled;
+  - stores only each turn's new messages and reuses identical system prompts and tools, gzip-compressed;
+  - `server.capture.retention_days` and `max_mb` limit disk use;
+  - `switchboard captures list` and `show` read them back.
+- The request log gains a `capture` field when a request was captured.
+
 ## 0.1.0 (2026-11-25)
 
 First release.

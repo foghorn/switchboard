@@ -21,7 +21,10 @@ server:
   expose_block_header: false    # true = add "X-Switchboard-Block: <id>" to responses
   probe_interval: 15            # seconds between health probes of cooling-down blocks
   context_refresh: 600          # seconds between context-window re-detection
-  state_dir: /state             # spend.json and requests.jsonl
+  state_dir: /state             # spend.json, requests.jsonl and captures/
+  capture:                      # only used by clients with capture: true (see docs/operations.md)
+    retention_days: 7           # capture days older than this are deleted
+    max_mb: 1024                # oldest days are deleted beyond this
 
 clients:                        # gateway keys, sent as "Authorization: Bearer" or "x-api-key" (16+ chars)
   - name: admin
@@ -29,6 +32,7 @@ clients:                        # gateway keys, sent as "Authorization: Bearer" 
     admin: true                 # may force a block (X-Switchboard-Force) and sees URLs in /status
   - name: my-app
     key: ${SWITCHBOARD_MY_APP_KEY}
+    capture: false              # true = save this client's full prompts and responses for debugging
 
 routes:
   - name: default                   # the model name clients use

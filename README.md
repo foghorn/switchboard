@@ -33,6 +33,7 @@ A typical chain is "use my local model, fall back to a second local box, and onl
   - `/status` shows per-block health.
   - A `check` command validates the config and probes every upstream before deploy.
   - One JSON log line per request. Prompts are never logged.
+  - Opt-in prompt capture per client: the exact request, what each upstream was sent after translation, and the full response, with conversation turns deduplicated on disk.
 - **Small.** Python, Starlette and httpx; no provider SDKs; one container with a read-only root filesystem.
 
 ## Quick start
@@ -107,7 +108,7 @@ routes:
 | [Configuration reference](docs/configuration.md) | Every setting, its default, and the `${VAR}` and live-reload rules |
 | [Failover behavior](docs/failover.md) | What triggers failover, timeouts, streaming commit, cooldown, spend caps, context windows |
 | [API and compatibility](docs/api.md) | Endpoints, authentication, the translation matrix, known limitations |
-| [Operations](docs/operations.md) | Deployment, `check`, logs, `/status`, forcing a block, security notes |
+| [Operations](docs/operations.md) | Deployment, `check`, logs, prompt capture, `/status`, forcing a block, security notes |
 
 ## Development
 

@@ -113,6 +113,12 @@ class Client(_Strict):
     name: str
     key: str = Field(min_length=16)
     admin: bool = False
+    capture: bool = False  # save this client's full prompts and responses (see server.capture)
+
+
+class CaptureSettings(_Strict):
+    retention_days: float = Field(7, gt=0)  # capture days older than this are deleted
+    max_mb: float = Field(1024, gt=0)  # oldest days are deleted beyond this; capture pauses if today alone is over
 
 
 class Server(_Strict):
@@ -121,7 +127,8 @@ class Server(_Strict):
     expose_block_header: bool = False  # X-Switchboard-Block on responses
     probe_interval: float = 15.0
     context_refresh: float = 600.0  # seconds between context-window re-detection
-    state_dir: str = "/state"  # spend.json and requests.jsonl
+    state_dir: str = "/state"  # spend.json, requests.jsonl and captures/
+    capture: CaptureSettings = CaptureSettings()
 
 
 class Config(_Strict):
