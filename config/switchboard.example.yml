@@ -29,7 +29,7 @@ server:
 clients:                        # gateway keys, sent as "Authorization: Bearer" or "x-api-key" (16+ chars)
   - name: admin
     key: ${SWITCHBOARD_ADMIN_KEY}
-    admin: true                 # may force a block (X-Switchboard-Force) and sees URLs in /status
+    admin: true                 # may force a block (X-Switchboard-Force), capture one request (X-Switchboard-Capture) and sees URLs in /status
   - name: my-app
     key: ${SWITCHBOARD_MY_APP_KEY}
     capture: false              # true = save this client's full prompts and responses for debugging

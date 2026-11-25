@@ -146,4 +146,5 @@ Block state (cooldown, counts, spend, detected context) is keyed by block `id`. 
   - Keys are compared in constant time.
   - Upstream keys never leave the gateway. Clients only ever see their own Switchboard key.
 - **Config file:** it holds client keys and possibly upstream keys. Keep it out of version control (the repository's `.gitignore` already does), or keep only `${VARS}` in it and supply the values through the environment.
+- **Captures:** when [capture](#capturing-prompts) is on, `state_dir/captures/` holds full prompts and responses. Treat the state volume as sensitive and back it up or share it accordingly. Request headers and API keys are never captured.
 - **Unauthenticated access:** `/health` is the only endpoint open without a key. It reveals the version and the advertised context window.
