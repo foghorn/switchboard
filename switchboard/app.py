@@ -92,7 +92,8 @@ def create_app(engine: Engine) -> Starlette:
             return error_response(fmt, 403, "x-switchboard-capture needs an admin key", "permission_error")
         capture = client.capture if want is None else want.strip().lower() in ("1", "true", "yes", "on")
         inbound = {k: v for k, v in request.headers.items() if k in ("anthropic-version", "anthropic-beta")}
-        return await engine.handle(fmt, body, client.name, force, inbound, capture=capture)
+        return await _until_disconnect(
+            request, engine.handle(fmt, body, client.name, force, inbound, capture=capture))
 
     async def count_tokens(request: Request) -> Response:
         _, denied = await guard(request)
@@ -184,6 +185,38 @@ def create_app(engine: Engine) -> Starlette:
             await engine.close()
 
     return Starlette(routes=routes, lifespan=lifespan)
+
+
+async def _until_disconnect(request: Request, work: Any) -> Response:
+    """Run `work`, cancelling it if the client hangs up first.
+
+    Until a response starts, nothing is sent to the client, so the framework never
+    notices a disconnect by itself. Without this, an aborted request keeps the
+    upstream busy (a long prompt read can take minutes) and may even fail over to
+    the next block for a client that is gone. Cancelling closes the upstream
+    connection, which tells the upstream server to stop. Once a stream has
+    started, its own send loop notices disconnects.
+    """
+
+    async def hangup() -> None:
+        while (await request.receive())["type"] != "http.disconnect":
+            pass
+
+    task = asyncio.ensure_future(work)
+    watcher = asyncio.ensure_future(hangup())
+    try:
+        await asyncio.wait({task, watcher}, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        if not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        watcher.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await watcher
+    if task.cancelled():
+        return Response(status_code=499)  # nobody is listening any more
+    return task.result()
 
 
 def _reload(engine: Engine, why: str) -> None:

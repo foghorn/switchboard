@@ -273,6 +273,13 @@ class Engine:
                 else:
                     resp = await self._try_once(block, client_fmt, body, route.name, inbound_headers,
                                                 entry, attempts, t0)
+            except asyncio.CancelledError:
+                ms = int((time.monotonic() - a0) * 1000)
+                attempts.append({"block": block.id, "error": "client disconnected", "ms": ms})
+                log.info("[%s] client disconnected while waiting for %s (%s ms); upstream request cancelled",
+                         rid, block.id, ms)
+                self._log(entry, attempts, None, t0, status=499, note="client disconnected before any output")
+                raise
             except UpstreamError as e:
                 ms = int((time.monotonic() - a0) * 1000)
                 attempts.append({"block": block.id, "error": e.message, "status": e.status, "ms": ms})
@@ -408,7 +415,7 @@ class Engine:
                 buffered += pipe.feed(item)
                 if p.is_progress(item):
                     break
-        except UpstreamError:
+        except (UpstreamError, asyncio.CancelledError):
             if resp is not None:
                 await resp.aclose()
             raise

@@ -60,7 +60,7 @@ Every request writes one JSON line to stdout (`docker logs`) and to `state_dir/r
 | `served_by` | The block that answered, or `null` if all failed |
 | `ttft_ms` | Streaming only: time until the request committed to a block |
 | `cost_usd` | Only for blocks with `pricing` |
-| `note` | Mid-stream problems: stall, upstream error, client disconnect |
+| `note` | Mid-stream problems (stall, upstream error) and client disconnects, before or during output. Status 499 means the client hung up. |
 | `capture` | Only when the request was [captured](#capturing-prompts): its capture id |
 
 The request log never contains prompts or responses. Those are only saved by capture, which is off unless you turn it on.

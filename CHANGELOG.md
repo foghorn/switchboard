@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1 (2026-11-26)
+
+- A client that disconnects before any output now cancels the upstream request at once and is not failed over. Before this, the upstream finished reading the prompt, which can take minutes, and a failure could even send the abandoned request on to the next block. Applies to streaming and non-streaming requests.
+
 ## 0.2.0 (2026-11-25)
 
 - Opt-in prompt capture (`capture: true` per client, or the admin-only `X-Switchboard-Capture` header):

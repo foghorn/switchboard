@@ -850,3 +850,69 @@ def test_capture_prune_and_missing_base(tmp_path):
     assert "3 earlier item(s)" in full["request"]["messages"][0]["content"]
     assert full["request"]["messages"][1]["content"] == "new"
     store.close()
+
+
+# ---------------------------------------------------------------------------
+# Client hang-ups
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("stream", [True, False])
+def test_client_disconnect_before_output_cancels_upstream(tmp_path, stream):
+    """A client that hangs up while the upstream is still reading the prompt must
+    stop the upstream request and must not fail over to the next block."""
+    fake = Fake()
+    closed = asyncio.Event()
+
+    async def slow(req, body):
+        async def gen():
+            try:
+                await asyncio.sleep(5)  # "reading the prompt"
+                yield b"data: {}\n\n"
+            finally:
+                closed.set()
+        if body.get("stream"):
+            return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=gen())
+        try:
+            await asyncio.sleep(5)
+        finally:
+            closed.set()
+        return httpx.Response(200, json=oa_resp())
+
+    fake.on("gpu-box", slow)
+    fake.on("ollama-box", lambda req, body: httpx.Response(200, json=oa_resp("should not be called")))
+    blocks = [oa_block("local", "gpu-box", timeouts={"connect": 1, "first_token": 10, "idle": 10, "total": 10}),
+              oa_block("ollama-box", "ollama-box")]
+    eng = Engine(make_cfg(tmp_path, blocks), transport=httpx.MockTransport(fake))
+    app = create_app(eng)
+    payload = json.dumps(CHAT | {"stream": stream}).encode()
+    sent = []
+
+    async def run():
+        msgs = [{"type": "http.request", "body": payload, "more_body": False}]
+
+        async def receive():
+            if msgs:
+                return msgs.pop(0)
+            await asyncio.sleep(0.3)  # the client hangs up shortly after sending
+            return {"type": "http.disconnect"}
+
+        async def send(m):
+            sent.append(m)
+
+        scope = {"type": "http", "asgi": {"version": "3.0", "spec_version": "2.4"}, "http_version": "1.1",
+                 "method": "POST", "scheme": "http", "path": "/v1/chat/completions", "raw_path": b"/v1/chat/completions",
+                 "query_string": b"", "root_path": "", "server": ("test", 80), "client": ("test", 1),
+                 "headers": [(b"authorization", f"Bearer {KEY}".encode()), (b"content-type", b"application/json")]}
+        t0 = asyncio.get_running_loop().time()
+        await asyncio.wait_for(app(scope, receive, send), timeout=4)
+        elapsed = asyncio.get_running_loop().time() - t0
+        await asyncio.wait_for(closed.wait(), timeout=1)
+        return elapsed
+
+    elapsed = asyncio.run(run())
+    assert elapsed < 2  # did not wait for the upstream
+    assert not fake.calls["ollama-box"]  # no failover for a client that left
+    assert eng.state.get("local").failures == 0  # the upstream did nothing wrong
+    line = json.loads((tmp_path / "state" / "requests.jsonl").read_text().splitlines()[-1])
+    assert line["status"] == 499 and line["attempts"][0]["error"] == "client disconnected"

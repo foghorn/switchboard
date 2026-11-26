@@ -40,6 +40,15 @@ For streaming requests Switchboard reads the upstream stream and **buffers** eve
 
 `first_token` therefore covers connection, queueing, prompt processing and, for reasoning models, the start of thinking. Size it for the slowest normal case: a cold model load, or a long prompt on slow hardware.
 
+## Client hang-ups
+
+If the client disconnects before any output has been sent, for example when a chat UI's stop button is pressed while the model is still reading a long prompt:
+- Switchboard cancels the upstream request at once. Closing that connection is how OpenAI-compatible servers are told to stop.
+- No other block is tried.
+- The block isn't counted as failing.
+
+The request log shows status 499 with `client disconnected` on that attempt. After a stream has started, a disconnect ends it the same way, and the log line says `client disconnected`.
+
 ## Non-streaming requests
 
 A non-streaming upstream call has no first-token signal; the response arrives all at once. Its only deadline is `total`. Fast failures (refused connection, 5xx) still fail over at once, but a block that accepts the request and then hangs holds it until `total`. Set `total` with that in mind, and set the client's own timeout to at least the sum of the `total`s it should be willing to wait through.
