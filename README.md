@@ -32,10 +32,12 @@ A typical chain is "use my local model, fall back to a second local box, and onl
   - Live config reload on save or SIGHUP; an invalid edit is ignored and logged.
   - `/status` shows per-block health.
   - A `check` command validates the config and probes every upstream before deploy.
-  - One JSON log line per request, without prompts or responses.
+  - One JSON log line per request, without prompts or responses, kept for 7 days by default.
   - Opt-in prompt capture per client: the exact request, what each upstream was sent after translation, and the full response, with conversation turns deduplicated on disk.
-  - An optional inspector web page: live requests, which block answered and where the time went, each captured prompt broken into system prompt, tools, documents and conversation, and capture switches per client.
-- **Small.** Python, Starlette and httpx; no provider SDKs; one container with a read-only root filesystem.
+  - An optional [inspector web page](docs/operations.md#inspector-page): live requests, which block answered and where the time went, each captured prompt broken into system prompt, tools, documents and conversation, and capture switches per client.
+- **Small.** Python on Starlette, uvicorn, httpx, pydantic and PyYAML; no provider SDKs; one container with a read-only root filesystem.
+
+![The inspector page: a list of requests on the left; on the right, one request's status, timing and token counts, a bar showing time spent waiting for the first token versus answering, and its prompt broken down, with tool definitions taking 91% and grouped by MCP server](docs/images/inspector.png)
 
 ## Quick start
 

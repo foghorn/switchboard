@@ -22,8 +22,8 @@ CLI:
 ```
 switchboard serve [--config PATH] [--host 0.0.0.0] [--port 8000]
 switchboard check [--config PATH]
-switchboard captures [list [--client NAME] [--day YYYY-MM-DD] [-n 20]]
-switchboard captures show ID [--trim N] [--tools] [--json] [--upstream BLOCK]
+switchboard captures [--dir PATH] [list [--client NAME] [--day YYYY-MM-DD] [-n 20]]
+switchboard captures [--dir PATH] show ID [--trim N] [--tools] [--json] [--upstream BLOCK]
 ```
 
 ## Pre-flight check
@@ -45,7 +45,7 @@ route default:
 
 ## Request log
 
-Every request writes one JSON line to stdout (`docker logs`) and to `state_dir/requests.jsonl`:
+Every request writes one JSON line to stdout (`docker logs`) and to `state_dir/requests.jsonl`. The file keeps `server.request_log.retention_days` (default 7) days of lines; older ones are deleted at startup and then hourly. `docker logs` is rotated by the Docker log driver instead. A line looks like this:
 
 ```json
 {"ts":"2026-01-15T03:00:12+0000","id":"53bb024bd378","client":"my-app","route":"default","api":"openai",
@@ -104,8 +104,6 @@ The request log's `capture` field gives the id to look up.
 
 **Privacy.** Captures contain everything the client sent and received, which may include personal or confidential data. Files are readable only by the service user (mode 0600). Capture only the clients you are debugging, and turn it off afterwards. API keys and request headers are never captured.
 
-`requests.jsonl` isn't rotated by Switchboard. Rotate it externally if the volume matters to you; `docker logs` rotation is set by the Docker log driver.
-
 ## Inspector page
 
 A live web view of the traffic, for diagnosing prompts and routing while you work on them. Turn it on in the config (applied live):
@@ -117,6 +115,8 @@ server:
 ```
 
 Then open `http://<switchboard host>:<port>/inspector` and sign in with an admin client key. The key is kept in that browser tab only (`sessionStorage`).
+
+![The inspector page: a list of requests on the left; on the right, one request's status, timing and token counts, a bar showing time spent waiting for the first token versus answering, and its prompt broken down, with tool definitions taking 91% and grouped by MCP server](images/inspector.png)
 
 The page shows:
 

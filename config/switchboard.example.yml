@@ -22,6 +22,8 @@ server:
   probe_interval: 15            # seconds between health probes of cooling-down blocks
   context_refresh: 600          # seconds between context-window re-detection
   state_dir: /state             # spend.json, requests.jsonl and captures/
+  request_log:
+    retention_days: 7           # requests.jsonl lines older than this are deleted
   capture:                      # only used by clients with capture: true (see docs/operations.md)
     retention_days: 7           # capture days older than this are deleted
     max_mb: 1024                # oldest days are deleted beyond this

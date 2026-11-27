@@ -1052,3 +1052,27 @@ def test_inspector_shows_requests_in_flight(tmp_path):
     live = asyncio.run(run())
     assert len(live) == 1 and live[0]["block"] == "local" and live[0]["phase"] == "waiting"
     assert "_body" in live[0] and eng.active == {}
+
+
+def test_request_log_retention(tmp_path):
+    from datetime import datetime, timedelta
+
+    from switchboard.state import StateStore
+
+    st = StateStore(tmp_path / "state")
+    path = tmp_path / "state" / "requests.jsonl"
+
+    def line(days_ago, rid):
+        ts = (datetime.now().astimezone() - timedelta(days=days_ago)).strftime("%Y-%m-%dT%H:%M:%S%z")
+        return json.dumps({"ts": ts, "id": rid}) + "\n"
+
+    path.write_text(line(10, "a") + line(8, "b") + line(6, "c") + line(0.1, "d"))
+    assert st.prune_requests(7) == 2
+    assert [json.loads(x)["id"] for x in path.read_text().splitlines()] == ["c", "d"]
+    # Pruning is hourly from log_request; a new line is appended without rewriting.
+    st.log_request({"ts": "x", "id": "e"}, 7)
+    assert [json.loads(x)["id"] for x in path.read_text().splitlines()] == ["c", "d", "e"]
+    # The engine trims on startup using server.request_log.retention_days.
+    path.write_text(line(3, "f") + line(1, "g"))
+    Engine(make_cfg(tmp_path, [oa_block("local", "gpu-box")], request_log={"retention_days": 2}))
+    assert [json.loads(x)["id"] for x in path.read_text().splitlines()] == ["g"]

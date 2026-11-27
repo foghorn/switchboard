@@ -7,7 +7,7 @@ import logging
 import sys
 import time
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from .config import Block
@@ -41,6 +41,7 @@ class StateStore:
 
     def __post_init__(self) -> None:
         self.writable = True
+        self.next_log_prune = 0.0
         try:
             self.state_dir.mkdir(parents=True, exist_ok=True)
             data = json.loads((self.state_dir / "spend.json").read_text())
@@ -112,7 +113,7 @@ class StateStore:
 
     # request log -----------------------------------------------------------
 
-    def log_request(self, entry: dict) -> None:
+    def log_request(self, entry: dict, retention_days: float | None = None) -> None:
         line = json.dumps(entry, separators=(",", ":"))
         print(line, file=sys.stdout, flush=True)
         if not self.writable:
@@ -122,6 +123,47 @@ class StateStore:
                 f.write(line + "\n")
         except OSError as e:
             log.warning("could not append requests.jsonl: %s", e)
+        if retention_days and time.time() >= self.next_log_prune:
+            self.prune_requests(retention_days)
+
+    def prune_requests(self, retention_days: float) -> int:
+        """Delete requests.jsonl lines older than retention_days; returns how many were removed.
+
+        Runs at most hourly. The file is in time order, so everything before the
+        first line inside the window goes. Trimming stops at a line whose time
+        can't be read, so nothing after it is lost.
+        """
+        self.next_log_prune = time.time() + 3600
+        if not self.writable:
+            return 0
+        path = self.state_dir / "requests.jsonl"
+        cutoff = datetime.now().astimezone() - timedelta(days=retention_days)
+        try:
+            with open(path, "rb") as f:
+                lines = f.readlines()
+        except OSError:
+            return 0
+        drop = 0
+        for raw in lines:
+            try:
+                ts = datetime.strptime(json.loads(raw)["ts"], "%Y-%m-%dT%H:%M:%S%z")
+            except (ValueError, KeyError, TypeError):
+                break
+            if ts >= cutoff:
+                break
+            drop += 1
+        if not drop:
+            return 0
+        try:
+            tmp = self.state_dir / "requests.jsonl.tmp"
+            with open(tmp, "wb") as f:
+                f.writelines(lines[drop:])
+            tmp.replace(path)
+        except OSError as e:
+            log.warning("could not trim requests.jsonl: %s", e)
+            return 0
+        log.info("request log: removed %d line(s) older than %g day(s)", drop, retention_days)
+        return drop
 
     # capture switches set from the inspector page ---------------------------
 

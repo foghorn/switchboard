@@ -28,6 +28,7 @@ routes:  [...]   # required, at least one
 | `probe_interval` | `15` | Seconds between health probes of blocks that are cooling down. |
 | `context_refresh` | `600` | Seconds between context-window re-detections. |
 | `state_dir` | `/state` | Where `spend.json`, `requests.jsonl` and `captures/` are written. If it isn't writable, spend is kept in memory only, the request log goes to stdout only, and nothing is captured. |
+| `request_log.retention_days` | `7` | Lines of [`requests.jsonl`](operations.md#request-log) older than this many days are deleted, at startup and then hourly. Fractions work (`0.5` is 12 hours). |
 | `capture.retention_days` | `7` | [Captures](operations.md#capturing-prompts) older than this many days are deleted. |
 | `capture.max_mb` | `1024` | When captures take more than this, the oldest days are deleted. If today's captures alone are over it, capturing pauses until they aren't. |
 | `inspector.enabled` | `false` | Serve the [inspector page](operations.md#inspector-page) at `/inspector` on the API port, for admin keys. Applied live. |

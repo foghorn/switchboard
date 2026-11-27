@@ -121,6 +121,10 @@ class CaptureSettings(_Strict):
     max_mb: float = Field(1024, gt=0)  # oldest days are deleted beyond this; capture pauses if today alone is over
 
 
+class RequestLogSettings(_Strict):
+    retention_days: float = Field(7, gt=0)  # requests.jsonl lines older than this are deleted (checked hourly)
+
+
 class InspectorSettings(_Strict):
     enabled: bool = False  # serve the /inspector page (admin keys only); takes effect on reload
     history: int = Field(500, ge=10, le=10000)  # finished requests kept in memory for the page (restart to change)
@@ -133,6 +137,7 @@ class Server(_Strict):
     probe_interval: float = 15.0
     context_refresh: float = 600.0  # seconds between context-window re-detection
     state_dir: str = "/state"  # spend.json, requests.jsonl and captures/
+    request_log: RequestLogSettings = RequestLogSettings()
     capture: CaptureSettings = CaptureSettings()
     inspector: InspectorSettings = InspectorSettings()
 

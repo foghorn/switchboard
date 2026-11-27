@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.0 (2026-11-27)
+
+- The request log (`state_dir/requests.jsonl`) is trimmed to `server.request_log.retention_days`, 7 days by default, at startup and then hourly. Before this it grew without limit. To keep more history, raise the setting.
+- Docs: a screenshot of the inspector page, the inspector's unauthenticated static files and `POST /inspector/api/capture` in the API reference, and `switchboard captures --dir`.
+
 ## 0.3.0 (2026-11-27)
 
 - Inspector page at `/inspector` (`server.inspector.enabled`, off by default, admin keys only):

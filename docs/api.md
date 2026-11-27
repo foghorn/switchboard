@@ -2,7 +2,7 @@
 
 ## Authentication
 
-Every endpoint except `/health` needs a client key from the config's `clients` list, sent either way:
+Every endpoint except `/health` and the inspector page's static files needs a client key from the config's `clients` list, sent either way:
 
 ```
 Authorization: Bearer <key>
@@ -22,7 +22,7 @@ Both headers work on every endpoint, so OpenAI SDKs (which send Bearer) and Anth
 | GET | `/v1/models/{name}` | One route. |
 | GET | `/props` | llama.cpp-style: `default_generation_settings.n_ctx` for the first route, for tools that read the window from there. |
 | GET | `/health` | Unauthenticated liveness check. Includes `max_context` for the first route. |
-| GET | `/inspector` | The [inspector page](operations.md#inspector-page), when `server.inspector.enabled` is true (404 otherwise). Its JSON API under `/inspector/api/` needs an admin key. |
+| GET | `/inspector` | The [inspector page](operations.md#inspector-page), when `server.inspector.enabled` is true (404 otherwise). The page and its script and stylesheet need no key; its JSON API under `/inspector/api/` (including `POST /inspector/api/capture` for the capture switches) needs an admin key. |
 | GET | `/status` | Per-route and per-block health, cooldown, last error, counts, detected context window and its source, and today's spend. Upstream URLs and models are shown only to admin clients. |
 
 ### Request headers Switchboard reads

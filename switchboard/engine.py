@@ -154,6 +154,7 @@ class Engine:
         self.cfg = cfg
         self.config_path = config_path
         self.state = StateStore(Path(cfg.server.state_dir))
+        self.state.prune_requests(cfg.server.request_log.retention_days)
         self.captures = CaptureStore(Path(cfg.server.state_dir) / "captures", lambda: self.cfg.server.capture)
         self.http = httpx.AsyncClient(transport=transport, limits=httpx.Limits(max_connections=200))
         # For the inspector page: requests in flight, and the most recent finished ones.
@@ -356,7 +357,7 @@ class Engine:
                 self.captures.finish(cap, e)
             except Exception:  # noqa: BLE001 - capture must never fail a request
                 log.exception("capture: could not record %s", cap.ref)
-        self.state.log_request(e)
+        self.state.log_request(e, self.cfg.server.request_log.retention_days)
         self.active.pop(e["id"], None)
         self._remember(e)
 
