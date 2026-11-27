@@ -76,7 +76,7 @@ clients:
     capture: true
 ```
 
-An admin key can also capture a single request with `X-Switchboard-Capture: 1`, or skip one with `0`.
+An admin key can also capture a single request with `X-Switchboard-Capture: 1`, or skip one with `0`. The [inspector page](#inspector-page) has switches for each client and one for every client at once.
 
 Each captured request is one file, `state_dir/captures/<day>/<id>.json.gz`, holding:
 
@@ -105,6 +105,37 @@ The request log's `capture` field gives the id to look up.
 **Privacy.** Captures contain everything the client sent and received, which may include personal or confidential data. Files are readable only by the service user (mode 0600). Capture only the clients you are debugging, and turn it off afterwards. API keys and request headers are never captured.
 
 `requests.jsonl` isn't rotated by Switchboard. Rotate it externally if the volume matters to you; `docker logs` rotation is set by the Docker log driver.
+
+## Inspector page
+
+A live web view of the traffic, for diagnosing prompts and routing while you work on them. Turn it on in the config (applied live):
+
+```yaml
+server:
+  inspector:
+    enabled: true
+```
+
+Then open `http://<switchboard host>:<port>/inspector` and sign in with an admin client key. The key is kept in that browser tab only (`sessionStorage`).
+
+The page shows:
+
+- **Requests in progress:** which block is working on each, whether it is still waiting for the first token or already answering, and for how long. Updated every two seconds.
+- **Finished requests:** status, the block that answered, failovers, time and tokens. The last `server.inspector.history` requests are kept, and refilled from `requests.jsonl` after a restart.
+- **For each request:**
+  - where the time went: failed attempts, waiting for the first token (prompt reading), then answering;
+  - time to first token and output speed.
+- **For captured requests only, the prompt broken into parts,** with token estimates:
+  - the system prompt;
+  - tool definitions, grouped by name prefix (an MCP server's tools share one), with each tool's description, schema and copied `$defs` sizes;
+  - documents (RAG `<source>` blocks and document attachments);
+  - earlier conversation, the latest user message, and this turn's tool calls and results.
+
+  You can also read every message, the response, and the raw JSON as received and as sent to each block.
+
+Requests from clients that aren't captured show timing and routing only, never prompt contents. The **Capture** panel turns capture on or off for each client, or for every client at once. These switches are saved in `state_dir/capture.json`, survive restarts, and win over `capture:` in the config until you reset them on the page. Each change is logged as a warning.
+
+Token figures for the parts are estimates: the upstream's reported input-token count is divided between them by size, or about 4 characters per token before an answer arrives.
 
 ## Status
 
@@ -147,4 +178,5 @@ Block state (cooldown, counts, spend, detected context) is keyed by block `id`. 
   - Upstream keys never leave the gateway. Clients only ever see their own Switchboard key.
 - **Config file:** it holds client keys and possibly upstream keys. Keep it out of version control (the repository's `.gitignore` already does), or keep only `${VARS}` in it and supply the values through the environment.
 - **Captures:** when [capture](#capturing-prompts) is on, `state_dir/captures/` holds full prompts and responses. Treat the state volume as sensitive and back it up or share it accordingly. Request headers and API keys are never captured.
+- **Inspector page:** when enabled, `/inspector` serves only static files without a key; all data and the capture switches need an admin key, sent as a bearer token (no cookies). The page shows captured prompts, so it is as sensitive as the captures themselves. It sends a strict Content-Security-Policy and renders every captured value as text.
 - **Unauthenticated access:** `/health` is the only endpoint open without a key. It reveals the version and the advertised context window.

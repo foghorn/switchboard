@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0 (2026-11-27)
+
+- Inspector page at `/inspector` (`server.inspector.enabled`, off by default, admin keys only):
+  - requests in progress, with the block working on each and how long it has been waiting or answering;
+  - finished requests, with failovers, timing and tokens;
+  - for captured requests, the prompt broken into system prompt, tool definitions grouped by MCP prefix, documents, conversation history, the latest message and this turn's tool calls, plus the messages, response and raw JSON;
+  - capture switches per client and for every client, saved in `state_dir/capture.json` and overriding the config until reset.
+
 ## 0.2.1 (2026-11-26)
 
 - A client that disconnects before any output now cancels the upstream request at once and is not failed over. Before this, the upstream finished reading the prompt, which can take minutes, and a failure could even send the abandoned request on to the next block. Applies to streaming and non-streaming requests.

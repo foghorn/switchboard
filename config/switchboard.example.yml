@@ -25,6 +25,8 @@ server:
   capture:                      # only used by clients with capture: true (see docs/operations.md)
     retention_days: 7           # capture days older than this are deleted
     max_mb: 1024                # oldest days are deleted beyond this
+  inspector:
+    enabled: false              # true = live web page at /inspector (admin keys only; see docs/operations.md)
 
 clients:                        # gateway keys, sent as "Authorization: Bearer" or "x-api-key" (16+ chars)
   - name: admin

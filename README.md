@@ -34,6 +34,7 @@ A typical chain is "use my local model, fall back to a second local box, and onl
   - A `check` command validates the config and probes every upstream before deploy.
   - One JSON log line per request, without prompts or responses.
   - Opt-in prompt capture per client: the exact request, what each upstream was sent after translation, and the full response, with conversation turns deduplicated on disk.
+  - An optional inspector web page: live requests, which block answered and where the time went, each captured prompt broken into system prompt, tools, documents and conversation, and capture switches per client.
 - **Small.** Python, Starlette and httpx; no provider SDKs; one container with a read-only root filesystem.
 
 ## Quick start
@@ -108,7 +109,7 @@ routes:
 | [Configuration reference](docs/configuration.md) | Every setting, its default, and the `${VAR}` and live-reload rules |
 | [Failover behavior](docs/failover.md) | What triggers failover, timeouts, streaming commit, cooldown, spend caps, context windows |
 | [API and compatibility](docs/api.md) | Endpoints, authentication, the translation matrix, known limitations |
-| [Operations](docs/operations.md) | Deployment, `check`, logs, prompt capture, `/status`, forcing a block, security notes |
+| [Operations](docs/operations.md) | Deployment, `check`, logs, prompt capture, the inspector page, `/status`, forcing a block, security notes |
 
 ## Development
 

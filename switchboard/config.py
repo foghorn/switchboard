@@ -121,6 +121,11 @@ class CaptureSettings(_Strict):
     max_mb: float = Field(1024, gt=0)  # oldest days are deleted beyond this; capture pauses if today alone is over
 
 
+class InspectorSettings(_Strict):
+    enabled: bool = False  # serve the /inspector page (admin keys only); takes effect on reload
+    history: int = Field(500, ge=10, le=10000)  # finished requests kept in memory for the page (restart to change)
+
+
 class Server(_Strict):
     # What to do when a request names a model that isn't a route.
     unknown_model: Literal["default", "reject"] = "default"
@@ -129,6 +134,7 @@ class Server(_Strict):
     context_refresh: float = 600.0  # seconds between context-window re-detection
     state_dir: str = "/state"  # spend.json, requests.jsonl and captures/
     capture: CaptureSettings = CaptureSettings()
+    inspector: InspectorSettings = InspectorSettings()
 
 
 class Config(_Strict):

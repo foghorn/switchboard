@@ -916,3 +916,139 @@ def test_client_disconnect_before_output_cancels_upstream(tmp_path, stream):
     assert eng.state.get("local").failures == 0  # the upstream did nothing wrong
     line = json.loads((tmp_path / "state" / "requests.jsonl").read_text().splitlines()[-1])
     assert line["status"] == 499 and line["attempts"][0]["error"] == "client disconnected"
+
+
+# ---------------------------------------------------------------------------
+# Inspector page
+# ---------------------------------------------------------------------------
+
+AH = {"authorization": f"Bearer {ADMIN}"}
+
+
+def _insp_client(tmp_path, fake, enabled=True, capture=False):
+    cfg = make_cfg(tmp_path, [oa_block("local", "gpu-box")], inspector={"enabled": enabled})
+    cfg.clients[0].capture = capture
+    eng = Engine(cfg, transport=httpx.MockTransport(fake))
+    return TestClient(create_app(eng)), eng
+
+
+def test_inspector_off_by_default_and_admin_only(tmp_path):
+    fake = Fake()
+    tc, eng = _insp_client(tmp_path, fake, enabled=False)
+    with tc:
+        for path in ("/inspector", "/inspector/app.js", "/inspector/api/feed"):
+            assert tc.get(path, headers=AH).status_code == 404
+        eng.cfg.server.inspector.enabled = True  # what a config reload does
+        page = tc.get("/inspector")
+        assert page.status_code == 200 and "Switchboard Inspector" in page.text
+        assert "script-src 'self'" in page.headers["content-security-policy"]
+        assert tc.get("/inspector/app.js").status_code == 200
+        assert tc.get("/inspector/../app.py").status_code == 404
+        assert tc.get("/inspector/api/feed").status_code == 401
+        assert tc.get("/inspector/api/feed", headers=H).status_code == 403
+        assert tc.get("/inspector/api/feed", headers=AH).status_code == 200
+
+
+def test_inspector_feed_and_uncaptured_detail(tmp_path):
+    fake = Fake()
+    fake.on("gpu-box", lambda req, body: httpx.Response(200, json=oa_resp()))
+    tc, eng = _insp_client(tmp_path, fake)
+    with tc:
+        tc.post("/v1/chat/completions", json=CHAT, headers=H)
+        feed = tc.get("/inspector/api/feed", headers=AH).json()
+        assert [e["served_by"] for e in feed["entries"]] == ["local"] and feed["active"] == []
+        rid = feed["entries"][0]["id"]
+        assert tc.get(f"/inspector/api/feed?after={feed['seq']}", headers=AH).json()["entries"] == []
+        d = tc.get(f"/inspector/api/request/{rid}", headers=AH).json()
+        assert d["state"] == "done" and "anatomy" not in d  # not captured: no prompt contents
+        assert tc.get(f"/inspector/api/request/{rid}/raw", headers=AH).status_code == 404
+    # A restart refills the list from requests.jsonl.
+    eng2 = Engine(make_cfg(tmp_path, [oa_block("local", "gpu-box")], inspector={"enabled": True}))
+    assert [e["id"] for e in eng2.recent] == [rid]
+
+
+def test_inspector_capture_switches(tmp_path):
+    fake = Fake()
+    fake.on("gpu-box", lambda req, body: httpx.Response(200, json=oa_resp()))
+    tc, eng = _insp_client(tmp_path, fake)
+    with tc:
+        assert tc.post("/inspector/api/capture", json={"client": "tester", "on": True}, headers=H).status_code == 403
+        assert tc.post("/inspector/api/capture", json={"client": "nobody", "on": True}, headers=AH).status_code == 404
+        assert tc.post("/inspector/api/capture", json={"client": None, "on": None}, headers=AH).status_code == 400
+        r = tc.post("/inspector/api/capture", json={"client": "tester", "on": True}, headers=AH)
+        assert r.json()["clients"] == {"tester": True, "admin": False}
+        tc.post("/v1/chat/completions", json=CHAT, headers=H)
+        tc.post("/inspector/api/capture", json={"client": "tester", "on": None}, headers=AH)  # back to config (off)
+        tc.post("/v1/chat/completions", json=CHAT, headers=H)
+        tc.post("/inspector/api/capture", json={"client": None, "on": True}, headers=AH)  # everything
+        tc.post("/v1/chat/completions", json=CHAT, headers=H)
+        feed = tc.get("/inspector/api/feed", headers=AH).json()
+    assert [bool(e.get("capture")) for e in feed["entries"]] == [True, False, True]
+    assert feed["capture_all"] is True and all(c["capture"] for c in feed["clients"])
+    # The switches are saved and survive a restart.
+    eng2 = Engine(make_cfg(tmp_path, [oa_block("local", "gpu-box")]))
+    assert eng2.capture_overrides == {"all": True, "clients": {}}
+
+
+def test_inspector_breakdown_of_a_captured_request(tmp_path):
+    fake = Fake()
+    fake.on("gpu-box", lambda req, body: httpx.Response(200, json=oa_resp("the answer")))
+    tc, eng = _insp_client(tmp_path, fake, capture=True)
+    doc = "line of the document\n" * 40
+    tools = ([{"type": "function", "function": {"name": f"tick_t{i}", "description": "d" * 50,
+                                                "parameters": {"type": "object", "$defs": {"X": {"type": "string"}}}}}
+              for i in range(5)]
+             + [{"type": "function", "function": {"name": "list_files", "parameters": {"type": "object"}}}])
+    body = {"model": "gateway", "tools": tools, "messages": [
+        {"role": "system", "content": "be brief"},
+        {"role": "user", "content": "old question"},
+        {"role": "assistant", "content": "old answer"},
+        {"role": "user", "content": 'Cite only when the <source> tag has an id (e.g. <source id="1">).\n'
+                                    f'<context><source id="1" name="notes.md">{doc}</source></context> new question'},
+        {"role": "assistant", "content": None, "tool_calls": [
+            {"id": "c1", "type": "function", "function": {"name": "list_files", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "c1", "content": "a.txt"},
+    ]}
+    with tc:
+        tc.post("/v1/chat/completions", json=body, headers=H)
+        rid = eng.recent[-1]["id"]
+        d = tc.get(f"/inspector/api/request/{rid}", headers=AH).json()
+        assert tc.get(f"/inspector/api/request/{rid}/raw?block=local", headers=AH).json()["model"] == "local-model"
+    an = d["anatomy"]
+    seg = {s["key"]: s for s in an["segments"]}
+    assert {"system", "tools", "documents", "history", "latest", "turn"} <= set(seg)
+    assert sum(s["tokens"] for s in an["segments"]) == pytest.approx(10, abs=3)  # shares the reported 10 tokens
+    assert [d["name"] for d in an["documents"]] == ["notes.md"]
+    assert len(doc) < an["documents"][0]["chars"] < len(doc) + 60
+    assert [m["category"] for m in an["messages"]] == ["system", "history", "history", "latest", "turn", "turn"]
+    assert an["messages"][4]["tool_calls"][0]["name"] == "list_files"
+    groups = {g["name"]: g for g in an["tool_groups"]}
+    assert groups["tick"]["count"] == 5 and groups["Other tools"]["count"] == 1
+    assert groups["tick"]["tools"][0]["defs_chars"] > 0
+    assert d["response"]["text"] == "the answer" and d["upstream_blocks"] == ["local"]
+
+
+def test_inspector_shows_requests_in_flight(tmp_path):
+    fake = Fake()
+    gate = asyncio.Event()
+
+    async def slow(req, body):
+        await gate.wait()
+        return httpx.Response(200, json=oa_resp())
+
+    fake.on("gpu-box", slow)
+    eng = Engine(make_cfg(tmp_path, [oa_block("local", "gpu-box")], inspector={"enabled": True}),
+                 transport=httpx.MockTransport(fake))
+    eng.cfg.clients[0].capture = True
+
+    async def run():
+        task = asyncio.create_task(eng.handle("openai", CHAT, "tester", None, {}, capture=True))
+        await asyncio.sleep(0.05)
+        live = list(eng.active.values())
+        gate.set()
+        await task
+        return live
+
+    live = asyncio.run(run())
+    assert len(live) == 1 and live[0]["block"] == "local" and live[0]["phase"] == "waiting"
+    assert "_body" in live[0] and eng.active == {}

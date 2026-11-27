@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Switchboard Inspector</title>
+<link rel="stylesheet" href="/inspector/app.css">
+<script src="/inspector/app.js" defer></script>
+</head>
+<body>
+<header class="top">
+  <div class="brand"><strong>Switchboard Inspector</strong> <span id="version" class="muted"></span></div>
+  <div class="controls" id="controls" hidden>
+    <label class="field">Client
+      <select id="client-filter"><option value="">All clients</option></select>
+    </label>
+    <label class="check"><input type="checkbox" id="captured-only"> Captured only</label>
+    <button type="button" id="capture-btn" class="btn" aria-expanded="false" aria-controls="capture-panel">Capture</button>
+    <button type="button" id="pause" class="btn">Pause</button>
+    <span id="conn" class="conn" title="Connection"><i></i><span>Connecting</span></span>
+    <button type="button" id="signout" class="btn ghost">Sign out</button>
+  </div>
+</header>
+
+<section id="capture-panel" class="cpanel" hidden>
+  <div class="cpanel-in">
+    <div class="cp-head">
+      <h2>Prompt capture</h2>
+      <p class="muted">Captured requests keep their full prompt and response on disk (in the state volume, kept for the configured retention) and show their breakdown here. Switches set here are saved and win over <code>capture:</code> in switchboard.yml until you reset them.</p>
+    </div>
+    <label class="switch all"><input type="checkbox" id="capture-all"> <span><strong>Capture everything</strong><br><span class="muted">Every client, whatever its own setting.</span></span></label>
+    <ul id="capture-clients" class="cp-list"></ul>
+    <p id="capture-error" class="error" hidden></p>
+  </div>
+</section>
+
+<section id="login" class="login" hidden>
+  <form id="login-form" autocomplete="off">
+    <h1>Sign in</h1>
+    <p>Enter an admin client key from <code>switchboard.yml</code>. It stays in this browser tab only and is cleared when you close the tab.</p>
+    <label for="key">Admin key</label>
+    <input id="key" type="password" spellcheck="false" autocomplete="off" required>
+    <p id="login-error" class="error" hidden></p>
+    <button type="submit" class="btn primary">Open the inspector</button>
+  </form>
+</section>
+
+<main id="app" class="app" hidden>
+  <aside class="list" aria-label="Requests">
+    <div id="active-wrap" hidden>
+      <h2 class="eyebrow">In progress</h2>
+      <ul id="active" class="rows"></ul>
+    </div>
+    <h2 class="eyebrow">Finished <span id="count" class="muted"></span></h2>
+    <ul id="finished" class="rows"></ul>
+    <p id="empty" class="muted pad" hidden>No requests yet. They appear here as they arrive.</p>
+  </aside>
+  <section id="detail" class="detail" aria-live="polite">
+    <div class="placeholder">
+      <h2>Pick a request</h2>
+      <p class="muted">The list on the left updates every two seconds. Requests from clients with capture turned on show the full prompt breakdown; the others show timing and routing only.</p>
+    </div>
+  </section>
+</main>
+</body>
+</html>

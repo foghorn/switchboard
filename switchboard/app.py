@@ -20,6 +20,7 @@ from starlette.routing import Route
 from . import __version__
 from .config import Client, Config, ConfigError, load_config
 from .engine import Engine, error_response
+from .inspector import inspector_routes
 
 log = logging.getLogger("switchboard")
 
@@ -90,7 +91,7 @@ def create_app(engine: Engine) -> Starlette:
         want = request.headers.get("x-switchboard-capture")
         if want is not None and not client.admin:
             return error_response(fmt, 403, "x-switchboard-capture needs an admin key", "permission_error")
-        capture = client.capture if want is None else want.strip().lower() in ("1", "true", "yes", "on")
+        capture = engine.capture_for(client) if want is None else want.strip().lower() in ("1", "true", "yes", "on")
         inbound = {k: v for k, v in request.headers.items() if k in ("anthropic-version", "anthropic-beta")}
         return await _until_disconnect(
             request, engine.handle(fmt, body, client.name, force, inbound, capture=capture))
@@ -168,6 +169,7 @@ def create_app(engine: Engine) -> Starlette:
         Route("/v1/models", models),
         Route("/models", models),
         Route("/v1/models/{model:path}", model_one),
+        *inspector_routes(engine),
     ]
 
     @contextlib.asynccontextmanager

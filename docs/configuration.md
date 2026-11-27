@@ -30,6 +30,8 @@ routes:  [...]   # required, at least one
 | `state_dir` | `/state` | Where `spend.json`, `requests.jsonl` and `captures/` are written. If it isn't writable, spend is kept in memory only, the request log goes to stdout only, and nothing is captured. |
 | `capture.retention_days` | `7` | [Captures](operations.md#capturing-prompts) older than this many days are deleted. |
 | `capture.max_mb` | `1024` | When captures take more than this, the oldest days are deleted. If today's captures alone are over it, capturing pauses until they aren't. |
+| `inspector.enabled` | `false` | Serve the [inspector page](operations.md#inspector-page) at `/inspector` on the API port, for admin keys. Applied live. |
+| `inspector.history` | `500` | Finished requests the inspector keeps in memory (refilled from `requests.jsonl` on start). Takes effect on restart. |
 
 ## `clients`
 
@@ -40,7 +42,7 @@ Every request must carry one of these keys, as `Authorization: Bearer <key>` or 
 | `name` | required | Label used in logs. Must be unique. |
 | `key` | required | At least 16 characters, unique. `openssl rand -base64 24` makes a good one. |
 | `admin` | `false` | May use `X-Switchboard-Force` and `X-Switchboard-Capture`, and sees upstream URLs and models in `/status`. |
-| `capture` | `false` | Save this client's full requests and responses to `state_dir/captures/`. See [capturing prompts](operations.md#capturing-prompts). |
+| `capture` | `false` | Save this client's full requests and responses to `state_dir/captures/`. See [capturing prompts](operations.md#capturing-prompts). A switch flipped on the inspector page overrides this until it is reset there. |
 
 ## `routes`
 

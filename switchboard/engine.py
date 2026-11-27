@@ -8,6 +8,7 @@ import json
 import logging
 import time
 import uuid
+from collections import deque
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -17,7 +18,7 @@ from starlette.responses import JSONResponse, Response, StreamingResponse
 
 from . import translate as tr
 from .capture import Assembler, CaptureStore
-from .config import Block, Config, Route
+from .config import Block, Client, Config, Route
 from .providers import PROVIDERS, Provider, UpstreamError, Usage, classify_http_error
 from .state import StateStore
 from .streams import (
@@ -155,6 +156,32 @@ class Engine:
         self.state = StateStore(Path(cfg.server.state_dir))
         self.captures = CaptureStore(Path(cfg.server.state_dir) / "captures", lambda: self.cfg.server.capture)
         self.http = httpx.AsyncClient(transport=transport, limits=httpx.Limits(max_connections=200))
+        # For the inspector page: requests in flight, and the most recent finished ones.
+        self.active: dict[str, dict] = {}
+        self.recent: deque[dict] = deque(maxlen=cfg.server.inspector.history)
+        self.seq = 0
+        for e in self.state.tail_requests(cfg.server.inspector.history):
+            self._remember(e)
+        # Capture switches flipped on the inspector page; they win over the config file.
+        self.capture_overrides = self.state.load_capture_overrides()
+
+    def capture_for(self, client: Client) -> bool:
+        o = self.capture_overrides
+        return o["all"] or o["clients"].get(client.name, client.capture)
+
+    def set_capture(self, client: str | None, on: bool | None) -> None:
+        """client=None: the capture-everything switch. on=None: back to the config file."""
+        o = self.capture_overrides
+        if client is None:
+            o["all"] = bool(on)
+        elif on is None:
+            o["clients"].pop(client, None)
+        else:
+            o["clients"][client] = on
+        self.state.save_capture_overrides(o)
+        log.warning("capture %s for %s (set on the inspector page)",
+                    "back to the config file" if on is None else ("ON" if on else "OFF"),
+                    "every client" if client is None else client)
 
     async def close(self) -> None:
         await self.http.aclose()
@@ -263,9 +290,16 @@ class Engine:
                                  "route": route.name, "api": client_fmt, "stream": stream}
         if capture and self.state.writable:
             entry["_cap"] = self.captures.start(rid, client, client_fmt, body)
+        live = {"id": rid, "ts": entry["ts"], "started": time.time(), "client": client, "route": route.name,
+                "api": client_fmt, "stream": stream, "est_tokens": estimate_tokens(body), "attempts": attempts,
+                "block": None, "phase": "starting", "captured": "_cap" in entry}
+        if live["captured"]:
+            live["_body"] = body  # only captured requests can be inspected
+        self.active[rid] = live
 
         for block in blocks:
             a0 = time.monotonic()
+            live["block"], live["phase"], live["block_started"] = block.id, "waiting", time.time()
             try:
                 if stream:
                     resp = await self._try_stream(block, client_fmt, body, route.name, inbound_headers,
@@ -296,6 +330,7 @@ class Engine:
 
         summary = "; ".join(f"{a['block']}: {a.get('error') or a.get('skipped')}" for a in attempts)
         self._log(entry, attempts, None, t0, status=503)
+        self.active.pop(rid, None)  # covers a forced block that was never tried
         return error_response(client_fmt, 503, f"all providers failed - {summary or 'no usable blocks'}",
                               "overloaded_error" if client_fmt == "anthropic" else "api_error")
 
@@ -322,6 +357,12 @@ class Engine:
             except Exception:  # noqa: BLE001 - capture must never fail a request
                 log.exception("capture: could not record %s", cap.ref)
         self.state.log_request(e)
+        self.active.pop(e["id"], None)
+        self._remember(e)
+
+    def _remember(self, entry: dict) -> None:
+        self.seq += 1
+        self.recent.append(dict(entry, seq=self.seq))
 
     # -- non-streaming ----------------------------------------------------
 
@@ -429,6 +470,8 @@ class Engine:
             raise UpstreamError(f"{type(e).__name__}: {e}") from e
 
         ttft_ms = int((time.monotonic() - start) * 1000)
+        if live := self.active.get(entry["id"]):
+            live["phase"], live["ttft_ms"] = "streaming", ttft_ms
         self.state.success(block)
         attempts.append({"block": block.id, "ok": True})
         assert resp is not None

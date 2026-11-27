@@ -123,6 +123,46 @@ class StateStore:
         except OSError as e:
             log.warning("could not append requests.jsonl: %s", e)
 
+    # capture switches set from the inspector page ---------------------------
+
+    def load_capture_overrides(self) -> dict:
+        try:
+            data = json.loads((self.state_dir / "capture.json").read_text())
+        except (OSError, ValueError):
+            return {"all": False, "clients": {}}
+        clients = data.get("clients") if isinstance(data.get("clients"), dict) else {}
+        return {"all": bool(data.get("all")), "clients": {str(k): bool(v) for k, v in clients.items()}}
+
+    def save_capture_overrides(self, overrides: dict) -> None:
+        if not self.writable:
+            return
+        try:
+            tmp = self.state_dir / "capture.json.tmp"
+            tmp.write_text(json.dumps(overrides, indent=2))
+            tmp.replace(self.state_dir / "capture.json")
+        except OSError as e:
+            log.warning("could not save capture.json: %s", e)
+
+    def tail_requests(self, n: int) -> list[dict]:
+        """The last n entries of requests.jsonl (to refill the inspector after a restart)."""
+        try:
+            with open(self.state_dir / "requests.jsonl", "rb") as f:
+                f.seek(0, 2)
+                size = f.tell()
+                f.seek(max(0, size - n * 4096))
+                lines = f.read().splitlines()[-n:]
+        except OSError:
+            return []
+        out = []
+        for line in lines:
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(e, dict) and "id" in e:
+                out.append(e)
+        return out
+
     def effective_context(self, block: Block) -> int | None:
         if isinstance(block.max_context_tokens, int):
             return block.max_context_tokens
