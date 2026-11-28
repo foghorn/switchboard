@@ -538,26 +538,53 @@ function outputTimeline(tl) {
 }
 
 function rawSection(e, d) {
-  const out = h("div");
-  const show = async (label, path) => {
+  const out = h("div", { class: "rawout", hidden: true });
+  const buttons = [];
+  let current = null;  // the pressed button
+  let loadId = 0;      // ignores a slow load that finished after another click
+  const select = async (button, note, path) => {
+    for (const b of buttons) b.setAttribute("aria-pressed", "false");
+    if (current === button) {  // pressing the shown one again hides it
+      current = null;
+      out.hidden = true;
+      out.replaceChildren();
+      return;
+    }
+    current = button;
+    button.setAttribute("aria-pressed", "true");
+    out.hidden = false;
     out.replaceChildren(h("p", { class: "muted" }, "Loading…"));
+    const id = ++loadId;
     try {
       const data = await api(path);
-      out.replaceChildren(h("p", { class: "muted" }, label), h("pre", null, JSON.stringify(data, null, 2)));
+      if (id === loadId) out.replaceChildren(h("p", { class: "muted" }, note), h("pre", null, JSON.stringify(data, null, 2)));
     } catch (err) {
-      out.replaceChildren(h("p", { class: "error" }, err.message));
+      if (id === loadId) out.replaceChildren(h("p", { class: "error" }, err.message));
     }
   };
   const base = `/inspector/api/request/${encodeURIComponent(e.id)}/raw`;
-  const btn = (label, note, path) => h("button", { type: "button", class: "btn", onclick: () => show(note, path) }, label);
   const q = (b) => encodeURIComponent(b);
+  const btn = (label, note, path) => {
+    const b = h("button", { type: "button", class: "btn toggle", "aria-pressed": "false", "aria-controls": `raw-${e.id}` }, label);
+    b.addEventListener("click", () => select(b, note, path));
+    buttons.push(b);
+    return b;
+  };
+  const group = (title, ...kids) => {
+    const items = kids.flat().filter(Boolean);
+    return items.length ? h("div", { class: "rawgroup", role: "group", "aria-label": title }, h("span", { class: "rawtitle" }, title), h("div", { class: "rawbtns" }, items)) : null;
+  };
+  out.id = `raw-${e.id}`;
   return h("div", { class: "sec" }, h("h3", null, "Raw JSON"),
     h("div", { class: "rawbar" },
-      btn("Request", "The request exactly as the client sent it.", `${base}?part=request`),
-      d.has_response ? btn("Response", "The response as the client received it. A streamed answer is shown put back together as one response.", `${base}?part=response`) : null,
-      (d.upstream_blocks || []).map((b) => btn(`Sent to ${b}`, `Exactly what ${b} was sent, after translation and the block's settings.`, `${base}?block=${q(b)}`)),
-      (d.upstream_responses || []).map((b) => btn(`Answer from ${b}`, `What ${b} answered, in its own format, before translation for the client.`, `${base}?block=${q(b)}&part=response`)),
-      btn("Whole capture", "The whole capture file: request, attempts, response and the request log fields.", base)),
+      group("Request",
+        btn("As the client sent it", "The request exactly as the client sent it.", `${base}?part=request`),
+        (d.upstream_blocks || []).map((b) => btn(`As sent to ${b}`, `Exactly what ${b} was sent, after translation and the block's settings.`, `${base}?block=${q(b)}`))),
+      group("Response",
+        d.has_response ? btn("As the client received it", "The response as the client received it. A streamed answer is shown put back together as one response.", `${base}?part=response`) : null,
+        (d.upstream_responses || []).map((b) => btn(`As ${b} answered`, `What ${b} answered, in its own format, before translation for the client.`, `${base}?block=${q(b)}&part=response`))),
+      group("Both",
+        btn("Whole capture", "The whole capture file: request, attempts, response and the request log fields.", base))),
     out);
 }
 

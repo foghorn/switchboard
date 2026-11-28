@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.2 (2026-11-28)
+
+- Raw JSON buttons are grouped into Request and Response. The one being shown stays highlighted, and pressing it again hides the JSON.
+
 ## 0.5.1 (2026-11-28)
 
 - The inspector's Raw JSON section shows the request and the response on their own, and each block's own answer when it was in a different format from the client's, besides the body each block was sent and the whole capture.
