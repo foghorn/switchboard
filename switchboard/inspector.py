@@ -127,7 +127,8 @@ def inspector_routes(engine: Engine) -> list[Route]:
                 out["capture_missing"] = True
             else:
                 out["anatomy"] = await asyncio.to_thread(analyze, doc.get("request") or {}, doc.get("tokens_in"))
-                out["response"] = response_view(doc.get("response"))
+                out["response"] = response_view(doc.get("response"), doc.get("tokens_out"))
+                out["output_timeline"] = doc.get("output_timeline")
                 out["upstream_blocks"] = [a["block"] for a in doc.get("attempts", []) if "body" in a]
         return JSONResponse(out, headers=_SECURITY)
 

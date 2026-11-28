@@ -412,12 +412,12 @@ class Engine:
         p = PROVIDERS[block.provider]
         nb = self.build_body(block, client_fmt, body, stream=True)
         cap = entry.get("_cap")
+        to = block.timeouts
+        start = time.monotonic()
         asm = None
         if cap is not None:
             cap.upstream(block.id, nb)
-            asm = Assembler(p.fmt)
-        to = block.timeouts
-        start = time.monotonic()
+            asm = Assembler(p.fmt, start)
         first_deadline = start + to.first_token
         total_deadline = start + to.total
         client_wants_usage = bool((body.get("stream_options") or {}).get("include_usage"))
@@ -535,7 +535,7 @@ class Engine:
             view = self.convert_response(p, client_fmt, copy.deepcopy(raw), alias)
         except Exception:  # noqa: BLE001 - a partial stream may not translate
             view = raw
-        cap.responded(block.id, raw, view, p.fmt == client_fmt)
+        cap.responded(block.id, raw, view, p.fmt == client_fmt, asm.timeline)
 
     # -- probes -----------------------------------------------------------
 

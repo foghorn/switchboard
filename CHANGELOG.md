@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0 (2026-11-28)
+
+- Captured streamed answers record when each part was produced: runs of thinking, answer text and tool calls, timed from when the request was sent (`output_timeline` in the capture file).
+- The inspector shows a captured response broken into parts: how the output tokens split between thinking, answer and tool calls, the timeline of each part for streamed answers, and the tool calls with their arguments laid out as JSON.
+- The inspector warns when an answer contains tool-call markup as plain text (`<tool_call>`, `<function=…>`, `[TOOL_CALLS]`, `<|python_tag|>`), which means the server didn't parse the model's tool call.
+
 ## 0.4.0 (2026-11-27)
 
 - The request log (`state_dir/requests.jsonl`) is trimmed to `server.request_log.retention_days`, 7 days by default, at startup and then hourly. Before this it grew without limit. To keep more history, raise the setting.

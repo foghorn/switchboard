@@ -232,20 +232,64 @@ def analyze(body: dict, tokens_in: int | None = None) -> dict:
     }
 
 
-def response_view(resp: Any) -> dict | None:
-    """The answer, whichever client format it was returned in."""
+# A tool call the model wrote as plain text, which the server's parser didn't turn into a real
+# call (Qwen/Hermes <tool_call>, Qwen3-Coder <function=...>, Mistral [TOOL_CALLS], Llama <|python_tag|>).
+_TEXT_TOOL_CALL_RE = re.compile(r"<tool_call>|<function=[\w.-]+>|\[TOOL_CALLS\]|<\|python_tag\|>")
+
+OUTPUT_PARTS = [("thinking", "Thinking"), ("answer", "Answer"), ("tool", "Tool calls")]
+
+
+def response_view(resp: Any, tokens_out: int | None = None) -> dict | None:
+    """The answer, whichever client format it was returned in, and what its output tokens went on."""
     if not isinstance(resp, dict):
         return None
+    reasoning_tokens = None
     if resp.get("choices"):
         c = resp["choices"][0] or {}
         m = c.get("message") or {}
-        return {"text": _text(m.get("content")), "reasoning": m.get("reasoning_content") or "",
-                "tool_calls": _tool_calls(m), "finish": c.get("finish_reason")}
-    if "content" in resp:
+        out = {"text": _text(m.get("content")), "reasoning": m.get("reasoning_content") or m.get("reasoning") or "",
+               "tool_calls": _tool_calls(m), "finish": c.get("finish_reason")}
+        details = (resp.get("usage") or {}).get("completion_tokens_details") or {}
+        if isinstance(details.get("reasoning_tokens"), int):
+            reasoning_tokens = details["reasoning_tokens"]
+    elif "content" in resp:
         content = resp.get("content") or []
         thinking = "\n".join(p.get("thinking", "") for p in content
                              if isinstance(p, dict) and p.get("type") == "thinking")
         text = _text([p for p in content if isinstance(p, dict) and p.get("type") == "text"])
-        return {"text": text, "reasoning": thinking, "tool_calls": _tool_calls({"content": content}),
-                "finish": resp.get("stop_reason")}
-    return None
+        out = {"text": text, "reasoning": thinking, "tool_calls": _tool_calls({"content": content}),
+               "finish": resp.get("stop_reason")}
+    else:
+        return None
+    out["text_tool_call"] = bool(_TEXT_TOOL_CALL_RE.search(out["text"]))
+    out |= _output_split(out, tokens_out, reasoning_tokens)
+    return out
+
+
+def _output_split(view: dict, tokens_out: int | None, reasoning_tokens: int | None) -> dict:
+    """Share the output tokens between thinking, answer and tool calls.
+
+    Uses the upstream's own reasoning-token count when it gives one, and splits the
+    rest by size; without any count, about 4 characters per token.
+    """
+    chars = {"thinking": len(view["reasoning"]), "answer": len(view["text"]),
+             "tool": sum(len(c.get("name") or "") + len(c.get("arguments") or "") for c in view["tool_calls"])}
+    tokens = dict.fromkeys(chars, 0)
+    if tokens_out:
+        rest_keys = list(chars)
+        rest = tokens_out
+        if reasoning_tokens is not None and 0 <= reasoning_tokens <= tokens_out:
+            tokens["thinking"], rest = reasoning_tokens, tokens_out - reasoning_tokens
+            rest_keys = ["answer", "tool"]
+        size = sum(chars[k] for k in rest_keys)
+        for k in rest_keys:
+            tokens[k] = round(rest * chars[k] / size) if size else 0
+    else:
+        tokens = {k: round(v / 4) for k, v in chars.items()}
+    return {
+        "output_tokens": tokens_out or sum(tokens.values()),
+        "output_measured": bool(tokens_out),
+        "reasoning_measured": reasoning_tokens is not None and bool(tokens_out),
+        "parts": [{"key": k, "label": label, "chars": chars[k], "tokens": tokens[k]}
+                  for k, label in OUTPUT_PARTS if chars[k] or tokens[k]],
+    }

@@ -34,7 +34,7 @@ A typical chain is "use my local model, fall back to a second local box, and onl
   - A `check` command validates the config and probes every upstream before deploy.
   - One JSON log line per request, without prompts or responses, kept for 7 days by default.
   - Opt-in prompt capture per client: the exact request, what each upstream was sent after translation, and the full response, with conversation turns deduplicated on disk.
-  - An optional [inspector web page](docs/operations.md#inspector-page): live requests, which block answered and where the time went, each captured prompt broken into system prompt, tools, documents and conversation, and capture switches per client.
+  - An optional [inspector web page](docs/operations.md#inspector-page): live requests, which block answered and where the time went, each captured prompt broken into system prompt, tools, documents and conversation, each captured response broken into thinking, answer and tool calls with when each was produced, and capture switches per client.
 - **Small.** Python on Starlette, uvicorn, httpx, pydantic and PyYAML; no provider SDKs; one container with a read-only root filesystem.
 
 ![The inspector page: a list of requests on the left; on the right, one request's status, timing and token counts, a bar showing time spent waiting for the first token versus answering, and its prompt broken down, with tool definitions taking 91% and grouped by MCP server](docs/images/inspector.png)

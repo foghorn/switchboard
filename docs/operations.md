@@ -86,6 +86,7 @@ Each captured request is one file, `state_dir/captures/<day>/<id>.json.gz`, hold
 | `attempts[].body` | What each tried block was actually sent: after translation, `defaults`, `overrides` and `drop_params`. Failed attempts are included, with their error. |
 | `attempts[].response` | The upstream's own answer, when its format differs from the client's |
 | `response` | What the client received. Streamed answers are put back together into one response; a stream cut off mid-way keeps what arrived. |
+| `output_timeline` | Streamed answers only: runs of `thinking`, `answer` and `tool` output, each with `start_ms` and `end_ms` (from when the request was sent to that block) and its size in characters |
 | everything else | The same fields as the request log line |
 
 Read them with the CLI; inside Docker, run it with `docker exec`:
@@ -131,7 +132,12 @@ The page shows:
   - documents (RAG `<source>` blocks and document attachments);
   - earlier conversation, the latest user message, and this turn's tool calls and results.
 
-  You can also read every message, the response, and the raw JSON as received and as sent to each block.
+  You can also read every message and the raw JSON as received and as sent to each block.
+- **For captured requests, the response broken into parts:**
+  - how the output tokens split between thinking, the answer and tool calls (the thinking count is the upstream's own when it reports one, as `completion_tokens_details.reasoning_tokens`);
+  - for streamed answers, a timeline of when each part was produced: the wait for the first output, then each run of thinking, answer text and tool calls, in order;
+  - the thinking, the answer, and each tool call with its arguments laid out as JSON;
+  - a warning when the answer contains tool-call markup such as `<tool_call>` or `<function=…>` as plain text. That means the model tried to call a tool but the server didn't turn it into a real call, usually because the tool isn't in the request's `tools` list.
 
 Requests from clients that aren't captured show timing and routing only, never prompt contents. The **Capture** panel turns capture on or off for each client, or for every client at once. These switches are saved in `state_dir/capture.json`, survive restarts, and win over `capture:` in the config until you reset them on the page. Each change is logged as a warning.
 

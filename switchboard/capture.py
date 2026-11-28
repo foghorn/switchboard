@@ -94,7 +94,7 @@ def _encode(body: dict, d: _Digest, candidates: list[_Digest]) -> dict:
 
 
 class Assembler:
-    def __init__(self, fmt: str):
+    def __init__(self, fmt: str, started: float | None = None):
         self.fmt = fmt
         self.out: dict = {}
         self.choices: dict[int, dict] = {}
@@ -102,12 +102,70 @@ class Assembler:
         self.partial: dict[int, str] = {}
         self.parts: list[dict] = []
         self.finish: str | None = None
+        # When each kind of output arrived, measured from when the request was sent
+        # (time.monotonic() at that moment): runs of thinking, answer text and tool calls.
+        self.started = started if started is not None else time.monotonic()
+        self.timeline: list[dict] = []
+        self._tool_blocks: set[int] = set()
 
     def feed(self, item: Any) -> None:
         try:
             getattr(self, f"_{self.fmt}")(item)
         except Exception:  # noqa: BLE001 - capture must never break a stream
             log.debug("capture: could not assemble stream item", exc_info=True)
+        try:
+            for kind, chars in self._kinds(item):
+                self._mark(kind, chars)
+        except Exception:  # noqa: BLE001
+            log.debug("capture: could not time stream item", exc_info=True)
+
+    def _mark(self, kind: str, chars: int) -> None:
+        now = int((time.monotonic() - self.started) * 1000)
+        last = self.timeline[-1] if self.timeline else None
+        if last is not None and last["kind"] == kind:
+            last["end_ms"], last["chars"] = now, last["chars"] + chars
+        else:
+            self.timeline.append({"kind": kind, "start_ms": now, "end_ms": now, "chars": chars})
+
+    def _kinds(self, item: Any) -> list[tuple[str, int]]:
+        """What one stream item carries: ("thinking" | "answer" | "tool", characters)."""
+        out: list[tuple[str, int]] = []
+        if self.fmt == "openai":
+            for ch in item.get("choices") or []:
+                d = ch.get("delta") or {}
+                think = sum(len(d[k]) for k in ("reasoning_content", "reasoning") if isinstance(d.get(k), str))
+                if think:
+                    out.append(("thinking", think))
+                if isinstance(d.get("content"), str) and d["content"]:
+                    out.append(("answer", len(d["content"])))
+                tools = sum(len((tc.get("function") or {}).get("name") or "")
+                            + len((tc.get("function") or {}).get("arguments") or "") for tc in d.get("tool_calls") or [])
+                if d.get("tool_calls"):
+                    out.append(("tool", tools))
+        elif self.fmt == "anthropic":
+            name, data = item
+            t = data.get("type", name)
+            if t == "content_block_start":
+                b = data.get("content_block") or {}
+                if b.get("type") in ("tool_use", "server_tool_use"):
+                    self._tool_blocks.add(data.get("index"))
+                    out.append(("tool", len(b.get("name") or "")))
+            elif t == "content_block_delta":
+                d = data.get("delta") or {}
+                if d.get("type") == "thinking_delta":
+                    out.append(("thinking", len(d.get("thinking") or "")))
+                elif d.get("type") == "text_delta":
+                    out.append(("answer", len(d.get("text") or "")))
+                elif d.get("type") == "input_json_delta":
+                    out.append(("tool", len(d.get("partial_json") or "")))
+        else:
+            cand = (item.get("candidates") or [{}])[0]
+            for part in (cand.get("content") or {}).get("parts") or []:
+                if "functionCall" in part:
+                    out.append(("tool", len(json.dumps(part["functionCall"]))))
+                elif isinstance(part.get("text"), str) and part["text"]:
+                    out.append(("thinking" if part.get("thought") else "answer", len(part["text"])))
+        return out
 
     def _openai(self, chunk: dict) -> None:
         for k in ("id", "created", "model", "system_fingerprint"):
@@ -218,12 +276,15 @@ class Record:
     bodies: dict[str, dict] = field(default_factory=dict)  # block id -> stored upstream body
     upstream_responses: dict[str, Any] = field(default_factory=dict)
     response: Any = None
+    timeline: list[dict] | None = None  # streamed answers only: see Assembler.timeline
 
     def upstream(self, block_id: str, body: dict) -> None:
         self.bodies[block_id] = self.store._encode(self, f"upstream:{block_id}", body)
 
-    def responded(self, block_id: str, upstream: Any, client_view: Any, same_format: bool) -> None:
+    def responded(self, block_id: str, upstream: Any, client_view: Any, same_format: bool,
+                  timeline: list[dict] | None = None) -> None:
         self.response = client_view
+        self.timeline = timeline
         if not same_format:
             self.upstream_responses[block_id] = upstream
 
@@ -271,6 +332,8 @@ class CaptureStore:
             attempts.append(a)
         doc = {k: v for k, v in entry.items() if k not in ("attempts", "capture")}
         doc |= {"ref": rec.ref, "request": rec.request, "attempts": attempts, "response": rec.response}
+        if rec.timeline:
+            doc["output_timeline"] = rec.timeline
         self.pool.submit(self._write, rec, doc)
 
     # -- writer thread -----------------------------------------------------

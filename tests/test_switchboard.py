@@ -1076,3 +1076,49 @@ def test_request_log_retention(tmp_path):
     path.write_text(line(3, "f") + line(1, "g"))
     Engine(make_cfg(tmp_path, [oa_block("local", "gpu-box")], request_log={"retention_days": 2}))
     assert [json.loads(x)["id"] for x in path.read_text().splitlines()] == ["g"]
+
+
+def test_inspector_response_parts_and_timeline(tmp_path):
+    def chunk(delta, finish=None):
+        return {"id": "c", "object": "chat.completion.chunk", "model": "u",
+                "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]}
+
+    stream = [chunk({"role": "assistant"}),
+              chunk({"reasoning_content": "Let me think. " * 20}),
+              chunk({"reasoning_content": "Done thinking."}),
+              chunk({"tool_calls": [{"index": 0, "id": "t1", "type": "function",
+                                     "function": {"name": "get_weather", "arguments": ""}}]}),
+              chunk({"tool_calls": [{"index": 0, "function": {"arguments": '{"city": "Raleigh"}'}}]}),
+              chunk({}, "tool_calls"),
+              {"id": "c", "object": "chat.completion.chunk", "model": "u", "choices": [],
+               "usage": {"prompt_tokens": 5, "completion_tokens": 100,
+                         "completion_tokens_details": {"reasoning_tokens": 80}}}]
+    fake = Fake()
+    fake.on("gpu-box", lambda req, body: sse_stream(oa_sse(stream), delay=0.01))
+    tc, eng = _insp_client(tmp_path, fake, capture=True)
+    body = {"model": "gateway", "stream": True, "stream_options": {"include_usage": True},
+            "messages": [{"role": "user", "content": "weather?"}]}
+    with tc:
+        with tc.stream("POST", "/v1/chat/completions", json=body, headers=H) as r:
+            "".join(r.iter_text())
+        d = tc.get(f"/inspector/api/request/{eng.recent[-1]['id']}", headers=AH).json()
+    r = d["response"]
+    assert r["tool_calls"][0]["name"] == "get_weather" and r["reasoning"].endswith("Done thinking.")
+    parts = {p["key"]: p["tokens"] for p in r["parts"]}
+    assert r["reasoning_measured"] and parts["thinking"] == 80 and parts["tool"] == 20 and "answer" not in parts
+    tl = d["output_timeline"]
+    assert [s["kind"] for s in tl] == ["thinking", "tool"]  # consecutive chunks of one kind merge
+    assert tl[0]["chars"] == len(r["reasoning"]) and tl[1]["start_ms"] >= tl[0]["end_ms"]
+    assert not r["text_tool_call"]
+
+
+def test_response_view_flags_tool_calls_written_as_text():
+    from switchboard.anatomy import response_view
+
+    resp = {"choices": [{"message": {"content": "<tool_call>\n<function=search_memories>\n<parameter=query>\nx\n"
+                                                "</parameter>\n</function>\n</tool_call>"}, "finish_reason": "stop"}]}
+    v = response_view(resp, 40)
+    assert v["text_tool_call"] and v["tool_calls"] == []
+    assert v["parts"] == [{"key": "answer", "label": "Answer", "chars": len(resp["choices"][0]["message"]["content"]),
+                           "tokens": 40}]
+    assert not response_view({"choices": [{"message": {"content": "plain"}}]})["text_tool_call"]

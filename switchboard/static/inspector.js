@@ -308,7 +308,7 @@ function renderDetail() {
     if (d.anatomy.tool_groups.length) root.append(toolsSection(d.anatomy));
     if (d.anatomy.documents.length) root.append(docsSection(d.anatomy));
     root.append(messagesSection(d.anatomy));
-    if (d.response) root.append(responseSection(d.response));
+    if (d.response) root.append(responseSection(d.response, d.output_timeline, e));
     if (!active) root.append(rawSection(e, d.upstream_blocks || []));
   } else if (d.capture_missing) {
     root.append(h("div", { class: "sec notice" }, "This request was captured, but the capture file is gone (deleted by the retention settings, or the volume was reset)."));
@@ -455,14 +455,85 @@ function messagesSection(an) {
   return sec;
 }
 
-function responseSection(r) {
-  const sec = h("div", { class: "sec" }, h("h3", null, `Response${r.finish ? ` (${r.finish})` : ""}`));
-  if (r.reasoning) sec.append(h("details", { class: "msg" }, h("summary", null, h("span", { class: "role" }, "reasoning"),
-    h("span", { class: "prev" }, r.reasoning.replace(/\s+/g, " ").slice(0, 160))), h("div", { class: "body" }, h("pre", null, r.reasoning))));
-  if (r.text) sec.append(h("pre", null, r.text));
-  if (r.tool_calls.length) sec.append(h("ul", { class: "calls" }, r.tool_calls.map((c) =>
-    h("li", null, h("strong", null, c.name), " ", h("code", null, c.arguments || "")))));
+const PART_LABEL = { thinking: "Thinking", answer: "Answer", tool: "Tool calls" };
+
+function responseSection(r, tl, e) {
+  const sec = h("div", { class: "sec" }, h("h3", null, `Response${r.finish ? ` (finish: ${r.finish})` : ""}`));
+  if (r.text_tool_call) {
+    sec.append(h("div", { class: "notice warn" }, h("strong", null, "The model wrote a tool call as text. "),
+      "The answer contains tool-call markup (such as <tool_call> or <function=…>) that the server didn't turn into a real tool call, so the client shows it as text and never runs the tool. This usually means the model called a tool that isn't in the request's tools list."));
+  }
+
+  // What the output tokens went on.
+  const parts = r.parts || [];
+  if (parts.length) {
+    const total = parts.reduce((t, p) => t + p.tokens, 0) || 1;
+    sec.append(h("p", { class: "muted" },
+      `${r.output_measured ? "" : "~"}${fmtInt(r.output_tokens)} output tokens. `,
+      r.reasoning_measured ? "Thinking is the upstream's own count; the answer and tool calls share the rest by size."
+        : r.output_measured ? "The upstream's output-token count, shared out by size, so the parts are estimates."
+          : "No output-token count from the upstream; these assume about 4 characters per token."));
+    const bar = h("div", { class: "stack", role: "img", "aria-label": parts.map((p) => `${p.label} ${pct(p.tokens, total)}`).join(", ") });
+    for (const p of parts) bar.append(h("div", { class: `o-${p.key}`, style: `flex:${Math.max(p.tokens, 1)}`, title: `${p.label}: ~${fmtInt(p.tokens)} tokens` }));
+    const legend = h("div", { class: "legend" });
+    for (const p of parts) legend.append(h("div", null, h("i", { class: `o-${p.key}` }), h("span", null, p.label),
+      h("span", { class: "v" }, `~${fmtInt(p.tokens)} · ${pct(p.tokens, total)}`)));
+    sec.append(bar, legend);
+  }
+
+  // When each part was produced (streamed and captured answers only).
+  if (tl && tl.length) sec.append(outputTimeline(tl));
+  else if (e) sec.append(h("p", { class: "muted", style: "margin-top:10px" }, e.stream
+    ? "No timing for each part: this capture was saved before Switchboard recorded it (0.5.0)."
+    : "Not streamed, so there's no timing for each part."));
+
+  // The parts themselves.
+  if (r.reasoning) {
+    sec.append(h("details", { class: "msg out-thinking", open: !r.text && !r.tool_calls.length },
+      h("summary", null, h("span", { class: "role" }, "Thinking"),
+        h("span", { class: "prev" }, r.reasoning.replace(/\s+/g, " ").slice(0, 160)),
+        h("span", { class: "size" }, `${fmtInt(r.reasoning.length)} chars`)),
+      h("div", { class: "body" }, h("pre", null, r.reasoning))));
+  }
+  if (r.text) {
+    sec.append(h("div", { class: "outpart out-answer" }, h("div", { class: "outhead" }, "Answer",
+      h("span", { class: "size" }, `${fmtInt(r.text.length)} chars`)), h("pre", null, r.text)));
+  }
+  for (const c of r.tool_calls) {
+    let args = c.arguments || "";
+    try { args = JSON.stringify(JSON.parse(args), null, 2); } catch (_) { /* show as sent */ }
+    sec.append(h("div", { class: "outpart out-tool" },
+      h("div", { class: "outhead" }, h("span", { class: "nw" }, "Tool call"), h("code", null, c.name || "?"), c.id ? h("span", { class: "size" }, c.id) : null),
+      h("pre", null, args || "(no arguments)")));
+  }
   if (!r.text && !r.tool_calls.length && !r.reasoning) sec.append(h("p", { class: "muted" }, "(empty)"));
+  return sec;
+}
+
+function outputTimeline(tl) {
+  // Each run lasts until the next one starts; the last one until its last piece arrived.
+  const runs = tl.map((s, i) => ({ ...s, dur: (i + 1 < tl.length ? tl[i + 1].start_ms : s.end_ms) - s.start_ms }));
+  const end = Math.max(runs[runs.length - 1].start_ms + runs[runs.length - 1].dur, 1);
+  const first = runs[0].start_ms;
+  const track = h("div", { class: "track" },
+    h("div", { class: "seg wait", style: `left:0;width:${(first / end) * 100}%`, title: `waiting for first output: ${fmtMs(first)}` }));
+  for (const s of runs) {
+    track.append(h("div", { class: `seg o-${s.kind}`, style: `left:${(s.start_ms / end) * 100}%;width:${(s.dur / end) * 100}%`,
+      title: `${PART_LABEL[s.kind]}: ${fmtMs(s.dur)} (${fmtInt(s.chars)} chars)` }));
+  }
+  const totals = {};
+  for (const s of runs) totals[s.kind] = (totals[s.kind] || 0) + s.dur;
+  const sec = h("div", { class: "outtl" }, h("h4", null, "When each part was produced"),
+    h("div", { class: "timeline" }, h("div", { class: "tl-row" }, h("span", { class: "lbl" }, "this answer"), track)),
+    h("div", { class: "legend-inline" },
+      h("span", null, h("i", { style: "background:var(--other)" }), `waiting for first output ${fmtMs(first)}`),
+      Object.keys(PART_LABEL).filter((k) => k in totals).map((k) =>
+        h("span", null, h("i", { class: `o-${k}` }), `${PART_LABEL[k].toLowerCase()} ${fmtMs(totals[k])}`))));
+  if (runs.length > Object.keys(totals).length) {  // only when the model switched back and forth
+    const shown = runs.slice(0, 12);
+    sec.append(h("ol", { class: "seq" }, shown.map((s) => h("li", null, h("i", { class: `o-${s.kind}` }),
+      `${PART_LABEL[s.kind]} ${fmtMs(s.dur)}`)), runs.length > shown.length ? h("li", { class: "muted" }, `… ${runs.length - shown.length} more`) : null));
+  }
   return sec;
 }
 

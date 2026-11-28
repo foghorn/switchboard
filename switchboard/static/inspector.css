@@ -4,6 +4,7 @@
   --accent: #2f62d4; --ok: #1d8a5f; --warn: #b7791f; --bad: #c2413a;
   --system: #8459c4; --tools: #2f62d4; --documents: #1d9a72; --history: #c58a22; --latest: #138a9c;
   --turn: #d0624a; --images: #8b93a3; --other: #b9c0cc;
+  --think: #b4458f; --answer: #1d8a5f; --toolcall: #d0624a;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   color-scheme: light;
@@ -14,6 +15,7 @@
     --accent: #6f97f0; --ok: #3dbb88; --warn: #e0a548; --bad: #ec6f66;
     --system: #a787dd; --tools: #6f97f0; --documents: #3fc395; --history: #dda64c; --latest: #3fb8c9;
     --turn: #ec8a72; --images: #7c8596; --other: #4a5262;
+    --think: #e07ab9; --answer: #3dbb88; --toolcall: #ec8a72;
     color-scheme: dark;
   }
 }
@@ -160,3 +162,21 @@ pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 520
   .tl-row { grid-template-columns: 90px 1fr; }
   .tl-note { margin-left: 0; }
 }
+
+/* The response: what the output went on and when each part was produced. */
+.o-thinking { background: var(--think); } .o-answer { background: var(--answer); } .o-tool { background: var(--toolcall); }
+.seg.o-thinking { background: var(--think); } .seg.o-answer { background: var(--answer); } .seg.o-tool { background: var(--toolcall); }
+.notice.warn { border-left: 4px solid var(--warn); margin-bottom: 12px; }
+.outtl { margin: 14px 0 12px; }
+.outtl h4, .outhead { margin: 0 0 6px; font-size: 13px; font-weight: 600; }
+.seq { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--muted); }
+.seq li { white-space: nowrap; }
+.seq i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; }
+.legend-inline i.o-thinking, .legend-inline i.o-answer, .legend-inline i.o-tool { display: inline-block; }
+details.msg.out-thinking { border-left-color: var(--think); }
+.outpart { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--answer); border-radius: 6px; padding: 8px 10px; margin-bottom: 6px; }
+.outpart.out-tool { border-left-color: var(--toolcall); }
+.outhead { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; min-width: 0; }
+.outhead .nw { white-space: nowrap; }
+.outhead code { overflow-wrap: anywhere; }
+.outhead .size { margin-left: auto; font-family: var(--mono); font-size: 12px; color: var(--muted); font-weight: 400; }
