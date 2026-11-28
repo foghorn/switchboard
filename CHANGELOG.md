@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.1 (2026-11-28)
+
+- The inspector's Raw JSON section shows the request and the response on their own, and each block's own answer when it was in a different format from the client's, besides the body each block was sent and the whole capture.
+
 ## 0.5.0 (2026-11-28)
 
 - Captured streamed answers record when each part was produced: runs of thinking, answer text and tool calls, timed from when the request was sent (`output_timeline` in the capture file).

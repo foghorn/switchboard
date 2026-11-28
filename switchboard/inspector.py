@@ -130,10 +130,17 @@ def inspector_routes(engine: Engine) -> list[Route]:
                 out["response"] = response_view(doc.get("response"), doc.get("tokens_out"))
                 out["output_timeline"] = doc.get("output_timeline")
                 out["upstream_blocks"] = [a["block"] for a in doc.get("attempts", []) if "body" in a]
+                out["upstream_responses"] = [a["block"] for a in doc.get("attempts", []) if "response" in a]
+                out["has_response"] = doc.get("response") is not None
         return JSONResponse(out, headers=_SECURITY)
 
     async def raw(request: Request) -> Response:
-        """The captured request (or what one block was sent) as JSON."""
+        """Part of a capture as JSON.
+
+        No parameters: the whole capture. ?part=request | response: what the client sent or
+        received. ?block=ID: what that block was sent; with &part=response, what it answered
+        (stored only when its format differs from the client's).
+        """
         if denied := check(request):
             return denied
         entry = _find(request.path_params["rid"])
@@ -143,11 +150,18 @@ def inspector_routes(engine: Engine) -> list[Route]:
         if doc is None:
             return JSONResponse({"error": "The capture file is gone."}, status_code=404, headers=_SECURITY)
         block = request.query_params.get("block")
+        part = request.query_params.get("part")
         if block:
-            body = next((a.get("body") for a in doc.get("attempts", []) if a.get("block") == block), None)
+            key = "response" if part == "response" else "body"
+            body = next((a.get(key) for a in doc.get("attempts", []) if a.get("block") == block), None)
             if body is None:
-                return JSONResponse({"error": f"No body recorded for {block}."}, status_code=404, headers=_SECURITY)
+                what = "response" if key == "response" else "request body"
+                return JSONResponse({"error": f"No {what} recorded for {block}."}, status_code=404, headers=_SECURITY)
             return JSONResponse(body, headers=_SECURITY)
+        if part in ("request", "response"):
+            if doc.get(part) is None:
+                return JSONResponse({"error": f"No {part} in this capture."}, status_code=404, headers=_SECURITY)
+            return JSONResponse(doc[part], headers=_SECURITY)
         return JSONResponse(doc, headers=_SECURITY)
 
     async def set_capture(request: Request) -> Response:

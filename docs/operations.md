@@ -132,7 +132,7 @@ The page shows:
   - documents (RAG `<source>` blocks and document attachments);
   - earlier conversation, the latest user message, and this turn's tool calls and results.
 
-  You can also read every message and the raw JSON as received and as sent to each block.
+  You can also read every message, and the raw JSON: the request as the client sent it, the response as the client received it, the body each block was sent, each block's own answer when its format differs from the client's, and the whole capture file.
 - **For captured requests, the response broken into parts:**
   - how the output tokens split between thinking, the answer and tool calls (the thinking count is the upstream's own when it reports one, as `completion_tokens_details.reasoning_tokens`);
   - for streamed answers, a timeline of when each part was produced: the wait for the first output, then each run of thinking, answer text and tool calls, in order;

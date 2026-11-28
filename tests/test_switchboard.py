@@ -1014,6 +1014,11 @@ def test_inspector_breakdown_of_a_captured_request(tmp_path):
         rid = eng.recent[-1]["id"]
         d = tc.get(f"/inspector/api/request/{rid}", headers=AH).json()
         assert tc.get(f"/inspector/api/request/{rid}/raw?block=local", headers=AH).json()["model"] == "local-model"
+        raw = f"/inspector/api/request/{rid}/raw"
+        assert tc.get(f"{raw}?part=request", headers=AH).json()["messages"] == body["messages"]
+        assert tc.get(f"{raw}?part=response", headers=AH).json()["choices"][0]["message"]["content"] == "the answer"
+        assert tc.get(f"{raw}?block=local&part=response", headers=AH).status_code == 404  # same format: not stored twice
+        assert tc.get(raw, headers=AH).json()["ref"]
     an = d["anatomy"]
     seg = {s["key"]: s for s in an["segments"]}
     assert {"system", "tools", "documents", "history", "latest", "turn"} <= set(seg)
@@ -1026,6 +1031,7 @@ def test_inspector_breakdown_of_a_captured_request(tmp_path):
     assert groups["tick"]["count"] == 5 and groups["Other tools"]["count"] == 1
     assert groups["tick"]["tools"][0]["defs_chars"] > 0
     assert d["response"]["text"] == "the answer" and d["upstream_blocks"] == ["local"]
+    assert d["has_response"] and d["upstream_responses"] == []
 
 
 def test_inspector_shows_requests_in_flight(tmp_path):

@@ -309,7 +309,7 @@ function renderDetail() {
     if (d.anatomy.documents.length) root.append(docsSection(d.anatomy));
     root.append(messagesSection(d.anatomy));
     if (d.response) root.append(responseSection(d.response, d.output_timeline, e));
-    if (!active) root.append(rawSection(e, d.upstream_blocks || []));
+    if (!active) root.append(rawSection(e, d));
   } else if (d.capture_missing) {
     root.append(h("div", { class: "sec notice" }, "This request was captured, but the capture file is gone (deleted by the retention settings, or the volume was reset)."));
   } else {
@@ -537,7 +537,7 @@ function outputTimeline(tl) {
   return sec;
 }
 
-function rawSection(e, blocks) {
+function rawSection(e, d) {
   const out = h("div");
   const show = async (label, path) => {
     out.replaceChildren(h("p", { class: "muted" }, "Loading…"));
@@ -549,11 +549,15 @@ function rawSection(e, blocks) {
     }
   };
   const base = `/inspector/api/request/${encodeURIComponent(e.id)}/raw`;
+  const btn = (label, note, path) => h("button", { type: "button", class: "btn", onclick: () => show(note, path) }, label);
+  const q = (b) => encodeURIComponent(b);
   return h("div", { class: "sec" }, h("h3", null, "Raw JSON"),
     h("div", { class: "rawbar" },
-      h("button", { type: "button", class: "btn", onclick: () => show("The whole capture, as the client sent it.", base) }, "Whole capture"),
-      blocks.map((b) => h("button", { type: "button", class: "btn",
-        onclick: () => show(`Exactly what ${b} was sent.`, `${base}?block=${encodeURIComponent(b)}`) }, `As sent to ${b}`))),
+      btn("Request", "The request exactly as the client sent it.", `${base}?part=request`),
+      d.has_response ? btn("Response", "The response as the client received it. A streamed answer is shown put back together as one response.", `${base}?part=response`) : null,
+      (d.upstream_blocks || []).map((b) => btn(`Sent to ${b}`, `Exactly what ${b} was sent, after translation and the block's settings.`, `${base}?block=${q(b)}`)),
+      (d.upstream_responses || []).map((b) => btn(`Answer from ${b}`, `What ${b} answered, in its own format, before translation for the client.`, `${base}?block=${q(b)}&part=response`)),
+      btn("Whole capture", "The whole capture file: request, attempts, response and the request log fields.", base)),
     out);
 }
 
